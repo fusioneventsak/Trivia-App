@@ -48,7 +48,8 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
   compact = false,
   className = '',
   pollState = 'closed',
-  lastUpdated
+  lastUpdated,
+  showOptionsOnly = false
 }) => {
   // Use provided getStorageUrl function or fall back to the utility function
   const getStorageUrlFn = customGetStorageUrl || getStorageUrl;
@@ -59,34 +60,87 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
   const [leadingOptionId, setLeadingOptionId] = useState<string | null>(null);
   const [isAnimating, setIsAnimating] = useState(false);
   const [barWidths, setBarWidths] = useState<{[key: string]: number}>({});
+  const [randomBarWidths, setRandomBarWidths] = useState<{[key: string]: number}>({});
   
   // Refs for tracking previous values
   const prevVotesRef = useRef<PollVotes>({});
   const prevTotalVotesRef = useRef<number>(0);
   const animationsRef = useRef<{[key: string]: number}>({});
   const prevPollStateRef = useRef<'pending' | 'voting' | 'closed'>('pending');
+  const randomAnimationRef = useRef<NodeJS.Timeout | null>(null);
   
-  // Initialize animated values
+  // Initialize random bar widths for voting state
   useEffect(() => {
-    setAnimatedVotes(votes);
-    setAnimatedTotalVotes(totalVotes);
-    prevVotesRef.current = votes;
-    prevTotalVotesRef.current = totalVotes;
-    prevPollStateRef.current = pollState;
-    
-    // Calculate initial bar widths
-    const initialWidths: {[key: string]: number} = {};
-    options.forEach(option => {
-      const optionId = option.id || option.text;
-      const voteCount = votes[optionId] || 0;
-      const percentage = totalVotes > 0 ? (voteCount / totalVotes * 100) : 0;
-      initialWidths[optionId] = Math.max(percentage, 4); // Minimum 4% for visibility
-    });
-    setBarWidths(initialWidths);
-    
-    // Determine leading option
-    updateLeadingOption(votes);
-  }, []);
+    if (pollState === 'voting' && !showOptionsOnly) {
+      // Initialize random widths
+      const initialRandomWidths: {[key: string]: number} = {};
+      options.forEach(option => {
+        const optionId = option.id || option.text;
+        initialRandomWidths[optionId] = Math.random() * 80 + 10; // Random between 10-90%
+      });
+      setRandomBarWidths(initialRandomWidths);
+      
+      // Start random animation
+      const animateRandomBars = () => {
+        setRandomBarWidths(prev => {
+          const newWidths: {[key: string]: number} = {};
+          options.forEach(option => {
+            const optionId = option.id || option.text;
+            const currentWidth = prev[optionId] || 50;
+            
+            // Random walk: move up or down by random amount
+            const change = (Math.random() - 0.5) * 30; // -15 to +15
+            let newWidth = currentWidth + change;
+            
+            // Keep within bounds (5% to 95%)
+            newWidth = Math.max(5, Math.min(95, newWidth));
+            
+            newWidths[optionId] = newWidth;
+          });
+          return newWidths;
+        });
+      };
+      
+      // Animate every 1-2 seconds
+      const animationInterval = setInterval(animateRandomBars, 1500);
+      randomAnimationRef.current = animationInterval;
+      
+      return () => {
+        if (randomAnimationRef.current) {
+          clearInterval(randomAnimationRef.current);
+        }
+      };
+    } else if (pollState === 'closed') {
+      // Clear random animation when poll closes
+      if (randomAnimationRef.current) {
+        clearInterval(randomAnimationRef.current);
+        randomAnimationRef.current = null;
+      }
+    }
+  }, [pollState, options, showOptionsOnly]);
+  
+  // Initialize real values when poll closes
+  useEffect(() => {
+    if (pollState === 'closed') {
+      setAnimatedVotes(votes);
+      setAnimatedTotalVotes(totalVotes);
+      prevVotesRef.current = votes;
+      prevTotalVotesRef.current = totalVotes;
+      
+      // Calculate real bar widths
+      const realWidths: {[key: string]: number} = {};
+      options.forEach(option => {
+        const optionId = option.id || option.text;
+        const voteCount = votes[optionId] || 0;
+        const percentage = totalVotes > 0 ? (voteCount / totalVotes * 100) : 0;
+        realWidths[optionId] = Math.max(percentage, 4); // Minimum 4% for visibility
+      });
+      setBarWidths(realWidths);
+      
+      // Determine leading option
+      updateLeadingOption(votes);
+    }
+  }, [pollState, votes, totalVotes, options]);
   
   // Update leading option
   const updateLeadingOption = (currentVotes: PollVotes) => {
@@ -106,15 +160,12 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
     setLeadingOptionId(leaderId);
   };
 
-  // Animate when votes change
+  // Animate when votes change (only for closed polls)
   useEffect(() => {
+    if (pollState !== 'closed') return;
+    
     // Check if votes have changed
     let hasChanged = totalVotes !== prevTotalVotesRef.current;
-    
-    // Force animation when poll state changes to voting
-    if (pollState === 'voting' && prevPollStateRef.current !== 'voting') {
-      hasChanged = true;
-    }
     
     if (!hasChanged) {
       // Check each option for changes
@@ -181,9 +232,6 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
       // Update leading option
       updateLeadingOption(votes);
       
-      // Update poll state ref
-      prevPollStateRef.current = pollState;
-      
       // Update refs for next comparison
       prevVotesRef.current = { ...votes };
       prevTotalVotesRef.current = totalVotes;
@@ -193,10 +241,13 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
         setIsAnimating(false);
       }, 1000 + (options.length * 100));
     }
-  }, [votes, totalVotes, options]);
+  }, [votes, totalVotes, options, pollState]);
 
   // Helper to get display label based on format
   const getDisplayLabel = (voteCount: number, percentage: string): string => {
+    if (pollState === 'voting' && !showOptionsOnly) {
+      return '???'; // Hide actual values during voting
+    }
     if (resultFormat === 'percentage') return `${percentage}%`;
     if (resultFormat === 'votes') return `${voteCount}`;
     return `${voteCount} (${percentage}%)`;
@@ -222,6 +273,9 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
 
   // Helper to get vote count for an option
   const getVoteCount = (option: PollOption): number => {
+    if (pollState === 'voting' && !showOptionsOnly) {
+      return 0; // Hide actual counts during voting
+    }
     // Try by option ID first if available
     if (option.id && animatedVotes[option.id] !== undefined) {
       return animatedVotes[option.id];
@@ -238,240 +292,45 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
     return selectedAnswer === option.text;
   };
 
-  // Render pie chart
-  if (displayType === 'pie') {
-    // Calculate angles for pie chart
-    let currentAngle = 0;
-    const pieSlices = options.map((option, index) => {
-      const voteCount = getVoteCount(option);
-      const percentage = animatedTotalVotes > 0 ? (voteCount / animatedTotalVotes * 360) : 0;
-      const slice = {
-        option,
-        startAngle: currentAngle,
-        endAngle: currentAngle + percentage,
-        percentage: animatedTotalVotes > 0 ? (voteCount / animatedTotalVotes * 100) : 0,
-        voteCount,
-        color: getColorForIndex(index),
-        isLeading: option.id === leadingOptionId || option.text === leadingOptionId
-      };
-      currentAngle += percentage;
-      return slice;
-    });
+  // Determine which width to use based on poll state
+  const getBarWidth = (optionId: string): number => {
+    if (pollState === 'voting' && !showOptionsOnly) {
+      return randomBarWidths[optionId] || 50;
+    }
+    return barWidths[optionId] || 0;
+  };
 
+  // Show options only (no results)
+  if (showOptionsOnly) {
     return (
       <div className={cn("p-4 bg-white/10 rounded-lg", className)}>
-        <div className="flex items-center justify-between mb-3 border-b border-white/10 pb-2">
-          <h3 className="font-semibold text-white">
-            {pollState === 'closed' ? 'Final Results' : 'Live Results'}
-          </h3>
-          <div className="text-sm text-white/80 flex items-center">
-            {animatedTotalVotes} votes
-            {pollState === 'voting' && (
-              <span className="ml-2 flex items-center">
-                <span className="relative flex h-2 w-2 mr-1">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                </span>
-                <span className="text-green-300 text-xs">Live</span>
-              </span>
-            )}
-          </div>
-        </div>
-      
-        <div className="flex flex-col items-center">
-          {/* SVG Pie Chart */}
-          <div className="relative w-64 h-64">
-            <svg viewBox="0 0 200 200" className="w-full h-full">
-              {pieSlices.map((slice, index) => {
-                if (slice.percentage === 0) return null;
-                
-                const startAngleRad = (slice.startAngle - 90) * Math.PI / 180;
-                const endAngleRad = (slice.endAngle - 90) * Math.PI / 180;
-                
-                const x1 = 100 + 80 * Math.cos(startAngleRad);
-                const y1 = 100 + 80 * Math.sin(startAngleRad);
-                const x2 = 100 + 80 * Math.cos(endAngleRad);
-                const y2 = 100 + 80 * Math.sin(endAngleRad);
-                
-                const largeArcFlag = slice.endAngle - slice.startAngle > 180 ? 1 : 0;
-                
-                const pathData = [
-                  `M 100 100`,
-                  `L ${x1} ${y1}`,
-                  `A 80 80 0 ${largeArcFlag} 1 ${x2} ${y2}`,
-                  `Z`
-                ].join(' ');
-                
-                return (
-                  <path
-                    key={index}
-                    d={pathData}
-                    fill={slice.color}
-                    stroke="white"
-                    strokeWidth="2"
-                    className={cn(
-                      "transition-opacity duration-300",
-                      isOptionSelected(slice.option) ? 'opacity-100' : 'opacity-80',
-                      slice.isLeading && 'filter drop-shadow-lg'
-                    )}
-                  />
-                );
-              })}
-            </svg>
-            
-            {/* Leading indicator */}
-            {leadingOptionId && (
-              <div className="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-yellow-400 text-yellow-900 px-2 py-1 rounded-full text-xs font-bold flex items-center shadow-lg animate-pulse">
-                <Crown className="w-3 h-3 mr-1" />
-                Leading!
-              </div>
-            )}
-          </div>
-          
-          {/* Legend */}
-          <div className="mt-4 space-y-2 w-full">
-            {options.map((option, index) => {
-              const voteCount = getVoteCount(option);
-              const percentage = animatedTotalVotes > 0 ? (voteCount / animatedTotalVotes * 100).toFixed(1) : '0.0';
-              const isSelected = isOptionSelected(option);
-              const isLeading = option.id === leadingOptionId || option.text === leadingOptionId;
-              
-              return (
-                <div key={index} className={cn(
-                  "flex items-center gap-2 p-2 rounded-lg transition-colors duration-300",
-                  isLeading && "bg-yellow-500/10",
-                  isSelected && "bg-white/10"
-                )}>
-                  <div 
-                    className="w-4 h-4 rounded"
-                    style={{ backgroundColor: getColorForIndex(index) }}
-                  />
-                  <div className="flex items-center flex-1">
-                    {isSelected && <CheckCircle className="w-3 h-3 mr-1 text-green-400" />}
-                    {isLeading && <Crown className="w-3 h-3 mr-1 text-yellow-400" />}
-                    {option.media_type !== 'none' && option.media_url && (
-                      <MediaDisplay
-                        url={option.media_url}
-                        type={option.media_type || 'image'}
-                        alt={option.text}
-                        className="w-6 h-6 rounded-full object-cover mr-1"
-                      />
-                    )}
-                    <span className="text-white">{option.text}</span>
-                  </div>
-                  <div className="text-sm text-white/80">
-                    {getDisplayLabel(voteCount, percentage)}
-                  </div>
+        <div className="space-y-3">
+          {options.map((option, index) => (
+            <div key={index} className="p-3 bg-white/5 rounded-lg">
+              <div className="flex items-center">
+                <div
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold mr-3"
+                  style={{ backgroundColor: getColorForIndex(index) }}
+                >
+                  {String.fromCharCode(65 + index)}
                 </div>
-              );
-            })}
-          </div>
-          
-          {/* Live update indicator */}
-          {pollState === 'voting' && lastUpdated && (
-            <div className="mt-3 text-xs text-white/60 flex items-center justify-center">
-              <Activity className="w-3 h-3 mr-1" />
-              <span>Live updates</span>
+                {option.media_type !== 'none' && option.media_url && (
+                  <img
+                    src={getStorageUrlFn(option.media_url)}
+                    alt={option.text}
+                    className="w-8 h-8 rounded-full object-cover mr-2"
+                  />
+                )}
+                <span className="font-medium text-white">{option.text}</span>
+              </div>
             </div>
-          )}
+          ))}
         </div>
       </div>
     );
   }
 
-  // Render vertical bars
-  if (displayType === 'vertical') {
-    return (
-      <div className={cn("p-4 bg-white/10 rounded-lg", className)}>
-        <div className="flex items-center justify-between mb-3 border-b border-white/10 pb-2">
-          <h3 className="font-semibold text-white">
-            {pollState === 'closed' ? 'Final Results' : 'Live Results'}
-          </h3>
-          <div className="text-sm text-white/80 flex items-center">
-            {animatedTotalVotes} votes
-            {pollState === 'voting' && (
-              <span className="ml-2 flex items-center">
-                <span className="relative flex h-2 w-2 mr-1">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                </span>
-                <span className="text-green-300 text-xs">Live</span>
-              </span>
-            )}
-          </div>
-        </div>
-        
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 h-48">
-          {options.map((option, index) => {
-            const voteCount = getVoteCount(option);
-            const percentage = animatedTotalVotes > 0 ? (voteCount / animatedTotalVotes * 100) : 0;
-            const color = getColorForIndex(index);
-            const isSelected = isOptionSelected(option);
-            const isLeading = option.id === leadingOptionId || option.text === leadingOptionId;
-            const optionId = option.id || option.text;
-            const barHeight = barWidths[optionId] || 0;
-            
-            return (
-              <div key={index} className="flex flex-col items-center h-full">
-                <div className="text-sm text-white mb-1 flex items-center">
-                  {getDisplayLabel(voteCount, percentage.toFixed(1))}
-                  {isLeading && (
-                    <Crown className="w-3 h-3 ml-1 text-yellow-400" />
-                  )}
-                </div>
-                
-                <div className="w-full flex-grow bg-white/20 rounded-t-lg relative flex justify-center">
-                  <div 
-                    className="absolute bottom-0 w-full transition-all duration-1000 ease-out rounded-t-lg"
-                    style={{ 
-                      height: `${barHeight}%`,
-                      backgroundColor: color,
-                      border: isSelected ? '2px solid white' : 'none'
-                    }}
-                  >
-                    {percentage > 20 && (
-                      <div className="absolute top-2 inset-x-0 text-center">
-                        <span className="text-xs text-white font-medium">
-                          {percentage.toFixed(0)}%
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                
-                <div className="text-xs text-white mt-2 text-center px-1">
-                  {option.media_type !== 'none' && option.media_url && (
-                    <div className="w-4 h-4 rounded-full overflow-hidden mx-auto mb-1">
-                      <MediaDisplay
-                        url={option.media_url}
-                        type={option.media_type || 'image'}
-                        alt={option.text}
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                  )}
-                  <div className="flex items-center justify-center">
-                    {isSelected && <CheckCircle className="w-3 h-3 mr-1 text-green-400" />}
-                    <span className="truncate" title={option.text}>{option.text}</span>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        
-        {/* Live update indicator */}
-        {pollState === 'voting' && lastUpdated && (
-          <div className="mt-3 text-xs text-white/60 flex items-center justify-center">
-            <Activity className="w-3 h-3 mr-1" />
-            <span>Live updates</span>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // Default: Horizontal bars
+  // Render horizontal bars (default)
   return (
     <div className={cn("p-4 bg-white/10 rounded-lg", className)}>
       <div className="flex items-center justify-between mb-3 border-b border-white/10 pb-2">
@@ -484,22 +343,17 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
               </span>
-              Live Results
+              Live Voting
             </>
           ) : (
             <>Poll Results</>
           )}
         </h3>
         <div className="text-sm text-white/80 flex items-center">
-          {animatedTotalVotes} votes
-          {pollState === 'voting' && (
-            <span className="ml-2 flex items-center">
-              <span className="relative flex h-2 w-2 mr-1">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-              </span>
-              <span className="text-green-300 text-xs">Live</span>
-            </span>
+          {pollState === 'voting' ? (
+            <span className="text-green-300">Voting in progress...</span>
+          ) : (
+            <>{animatedTotalVotes} votes</>
           )}
         </div>
       </div>
@@ -509,9 +363,9 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
           const voteCount = getVoteCount(option);
           const percentage = animatedTotalVotes > 0 ? (voteCount / animatedTotalVotes * 100) : 0;
           const isSelected = isOptionSelected(option);
-          const isLeading = option.id === leadingOptionId || option.text === leadingOptionId;
+          const isLeading = pollState === 'closed' && (option.id === leadingOptionId || option.text === leadingOptionId);
           const optionId = option.id || option.text;
-          const barWidth = barWidths[optionId] || 0;
+          const barWidth = getBarWidth(optionId);
           
           return (
             <div key={index} className={cn(
@@ -520,11 +374,11 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
             )}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center">
-                  {isSelected && <CheckCircle className="w-4 h-4 mr-1 text-green-400" />}
+                  {isSelected && pollState === 'closed' && <CheckCircle className="w-4 h-4 mr-1 text-green-400" />}
                   {isLeading && <Crown className="w-4 h-4 mr-1 text-yellow-400" />}
                   {option.media_type !== 'none' && option.media_url && (
                     <img
-                      src={option.media_url}
+                      src={getStorageUrlFn(option.media_url)}
                       crossOrigin="anonymous"
                       alt={option.text}
                       className="w-8 h-8 rounded-full object-cover mr-2 border border-white/30"
@@ -542,14 +396,17 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
               
               <div className="w-full bg-white/20 rounded-full h-6 overflow-hidden">
                 <div 
-                  className="h-full transition-all duration-1000 ease-out flex items-center px-2"
+                  className={cn(
+                    "h-full flex items-center px-2",
+                    pollState === 'voting' ? "transition-all duration-[1500ms] ease-in-out" : "transition-all duration-1000 ease-out"
+                  )}
                   style={{ 
                     width: `${barWidth}%`,
                     backgroundColor: getColorForIndex(index),
-                    border: isSelected ? '2px solid white' : 'none'
+                    border: isSelected && pollState === 'closed' ? '2px solid white' : 'none'
                   }}
                 >
-                  {percentage >= 15 && (
+                  {barWidth >= 15 && pollState === 'closed' && (
                     <span className="text-xs text-white font-medium truncate">
                       {percentage.toFixed(0)}%
                     </span>
@@ -561,17 +418,19 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
         })}
       </div>
       
-      {animatedTotalVotes === 0 && (
-        <div className="text-center text-white/60 mt-4">
-          No votes yet
+      {/* Status indicators */}
+      {pollState === 'voting' && (
+        <div className="mt-4 text-center">
+          <div className="inline-flex items-center px-3 py-1 bg-green-500/20 rounded-full">
+            <Activity className="w-4 h-4 mr-2 text-green-400 animate-pulse" />
+            <span className="text-sm text-green-300">Results will be revealed when voting closes</span>
+          </div>
         </div>
       )}
       
-      {/* Live update indicator */}
-      {pollState === 'voting' && lastUpdated && (
-        <div className="mt-3 text-xs text-white/60 flex items-center justify-center">
-          <Activity className="w-3 h-3 mr-1" />
-          <span>Live updates</span>
+      {pollState === 'closed' && animatedTotalVotes === 0 && (
+        <div className="text-center text-white/60 mt-4">
+          No votes were cast
         </div>
       )}
     </div>
