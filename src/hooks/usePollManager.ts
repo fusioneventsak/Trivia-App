@@ -75,6 +75,25 @@ export function usePollManager({
   const initializePoll = useCallback(async () => {
     if (!activationId) return;
     
+    // Force poll state update from database
+    try {
+      const { data: activation, error } = await supabase
+        .from('activations')
+        .select('poll_state')
+        .eq('id', activationId)
+        .single();
+        
+      if (!error && activation && activation.poll_state) {
+        setPollState(activation.poll_state);
+        
+        if (debugMode) {
+          console.log(`[${debugIdRef.current}] Updated poll state from database: ${activation.poll_state}`);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching poll state:', err);
+    }
+    
     if (debugMode) {
       console.log(`[${debugIdRef.current}] Initializing poll for activation: ${activationId}, player: ${playerId || 'none'}, interval: ${pollingInterval}ms`);
     }
@@ -349,6 +368,14 @@ export function usePollManager({
               console.log(`[${debugIdRef.current}] Poll state changed: ${payload.old?.poll_state} -> ${payload.new.poll_state}`);
             }
             setPollState(payload.new.poll_state || 'pending');
+            
+            // When poll state changes to voting, force an immediate poll
+            if (payload.new.poll_state === 'voting') {
+              if (debugMode) {
+                console.log(`[${debugIdRef.current}] Poll state changed to voting, forcing immediate poll`);
+              }
+              initializePoll();
+            }
             
             // Reset to fast polling when state changes
             if (pollingInterval > 2000) {

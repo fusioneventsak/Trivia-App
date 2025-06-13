@@ -27,7 +27,7 @@ const PollStateIndicator: React.FC<PollStateIndicatorProps> = ({
       bgColor = 'bg-yellow-500/20';
       textColor = 'text-yellow-100';
       icon = <Clock className={size === 'sm' ? 'w-3 h-3 mr-1' : size === 'lg' ? 'w-6 h-6 mr-2' : 'w-5 h-5 mr-2'} />;
-      label = 'Ready for voting';
+      label = 'Waiting for Poll to Start';
       break;
     case 'voting':
       bgColor = 'bg-green-500/20';

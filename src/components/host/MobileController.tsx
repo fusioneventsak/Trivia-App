@@ -346,6 +346,8 @@ export default function MobileController() {
       setIsControllingPoll(true);
       setError(null);
       
+      console.log('Starting poll voting for activation:', currentActivation);
+      
       // Update the poll state to voting
       const { error } = await supabase
         .from('activations')

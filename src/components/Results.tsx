@@ -794,7 +794,7 @@ export default function Results() {
                   {currentActivation.type === 'poll' && (
                     /* Poll display */
                     <div className="space-y-4">
-                      <PollStateIndicator state={pollState} className="mb-2" />
+                      <PollStateIndicator state={pollState} className="mb-4" />
                       
                       {pollState === 'pending' ? (
                         /* Show question and options in a grid when pending */
@@ -822,13 +822,15 @@ export default function Results() {
                           ))}
                         </div>
                       ) : (
-                        /* Show animated poll results when voting or closed */
+                        /* Show animated poll results when voting is active or closed */
                         <PollDisplay
                           options={currentActivation.options || []}
                           votes={pollVotesByText}
                           totalVotes={totalVotes}
                           displayType={currentActivation.poll_display_type || 'bar'}
                           resultFormat={currentActivation.poll_result_format || 'both'}
+                          pollState={pollState}
+                          lastUpdated={pollLastUpdated}
                           getStorageUrl={getStorageUrl}
                           themeColors={activeTheme}
                           pollState={pollState}
