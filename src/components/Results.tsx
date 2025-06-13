@@ -95,7 +95,9 @@ export default function Results() {
     votesByText: pollVotesByText,
     totalVotes,
     pollState,
-    loading: pollLoading,
+    isLoading: pollLoading,
+    lastUpdated: pollLastUpdated,
+    pollingInterval,
     initializePoll,
     cleanup: cleanupPoll
   } = usePollManager(code || '', currentActivation?.id || '', 'results');
@@ -419,6 +421,8 @@ export default function Results() {
                           displayType={currentActivation.poll_display_type || 'bar'}
                           resultFormat={currentActivation.poll_result_format || 'percentage'}
                           isLoading={pollLoading}
+                          pollState={pollState}
+                          lastUpdated={pollLastUpdated}
                         />
                       )}
                     </div>
