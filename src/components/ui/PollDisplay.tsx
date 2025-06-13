@@ -494,11 +494,14 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
                   {isSelected && <CheckCircle className="w-4 h-4 mr-1 text-green-400" />}
                   {isLeading && <Crown className="w-4 h-4 mr-1 text-yellow-400" />}
                   {option.media_type !== 'none' && option.media_url && (
-                    <MediaDisplay
-                      url={getStorageUrlFn(option.media_url)}
-                      type={option.media_type || 'image'}
+                    <img
+                      src={option.media_url}
+                      crossOrigin="anonymous"
                       alt={option.text}
                       className="w-8 h-8 rounded-full object-cover mr-2 border border-white/30"
+                      onError={(e) => {
+                        e.currentTarget.src = 'https://via.placeholder.com/100?text=!';
+                      }}
                     />
                   )}
                   <span className="font-medium text-white">{option.text}</span>
