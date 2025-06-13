@@ -160,12 +160,12 @@ export function usePollManager({
             noChangeCountRef.current++;
             
             if (debugMode) {
-              console.log(`[${debugIdRef.current}] No change in vote count (${currentVoteCount}), consecutive no-changes: ${noChangeCountRef.current}`);
+              console.log(`[${debugIdRef.current}] No change in vote count (${currentVoteCount}), consecutive no-changes: ${noChangeCountRef.current}, current interval: ${pollingInterval}ms`);
             }
             
             // If no changes for several polls, increase polling interval
             if (noChangeCountRef.current >= 3 && pollState === 'voting') {
-              const newInterval = Math.min(10000, pollingInterval * 1.5); // Max 10 seconds
+              const newInterval = Math.min(10000, Math.round(pollingInterval * 1.5)); // Max 10 seconds
               if (newInterval !== pollingInterval) {
                 if (debugMode) {
                   console.log(`[${debugIdRef.current}] Increasing polling interval due to inactivity: ${pollingInterval}ms -> ${newInterval}ms`);

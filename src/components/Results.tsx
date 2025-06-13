@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { Trophy, RefreshCw, Users, Clock, Lock, PlayCircle, AlertCircle, WifiOff } from 'lucide-react';
+import { Trophy, RefreshCw, Users, Clock, Lock, PlayCircle, AlertCircle, WifiOff, Activity } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import CountdownTimer from './ui/CountdownTimer';
 import LeaderboardDisplay from './ui/LeaderboardDisplay';
@@ -823,4 +823,4 @@ export default function Results() {
                     <div className="space-y-4">
                       <PollStateIndicator state={pollState} />
                       
-                      {pollState === 'pending
+                      {pollState === 
