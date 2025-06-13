@@ -121,6 +121,8 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
   
   // Initialize real values when poll closes
   useEffect(() => {
+   console.log(`PollDisplay: Poll state changed to ${pollState}`);
+   
     if (pollState === 'closed') {
       // Add a small delay for dramatic effect
       setTimeout(() => {

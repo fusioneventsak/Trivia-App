@@ -75,6 +75,10 @@ export function usePollManager({
   const initializePoll = useCallback(async () => {
     if (!activationId) return;
     
+   if (debugMode) {
+     console.log(`[${debugIdRef.current}] Initializing poll for activation: ${activationId}, player: ${playerId || 'none'}, interval: ${pollingInterval}ms`);
+   }
+   
     // Force poll state update from database
     try {
       const { data: activation, error } = await supabase
@@ -84,6 +88,9 @@ export function usePollManager({
         .single();
         
       if (!error && activation && activation.poll_state) {
+       if (debugMode && pollState !== activation.poll_state) {
+         console.log(`[${debugIdRef.current}] Poll state changed: ${pollState} -> ${activation.poll_state}`);
+       }
         setPollState(activation.poll_state);
         
         if (debugMode) {

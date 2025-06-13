@@ -20,6 +20,10 @@ export default function AdminPanel() {
   const [loadingTimeout, setLoadingTimeout] = useState<NodeJS.Timeout | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [room, setRoom] = useState<any>(null);
+  const [currentActivation, setCurrentActivation] = useState<string | null>(null);
+  const [pollState, setPollState] = useState<'pending' | 'voting' | 'closed'>('pending');
+  const [activeType, setActiveType] = useState<string | null>(null);
+  const [isControllingPoll, setIsControllingPoll] = useState(false);
   
   const startPollVoting = async () => {
     if (!currentActivation) return;
@@ -30,6 +34,25 @@ export default function AdminPanel() {
       
       console.log('Starting poll voting for activation:', currentActivation);
       
+     // First, check the current state to avoid unnecessary updates
+     const { data: currentState, error: stateError } = await supabase
+       .from('activations')
+       .select('poll_state')
+       .eq('id', currentActivation)
+       .single();
+       
+     if (stateError) throw stateError;
+     
+     // If already in the desired state, just update local state
+     if (currentState?.poll_state === 'voting') {
+       console.log('Poll is already in voting state');
+       setPollState('voting');
+       setSuccessMessage('Poll is already in voting state');
+       setTimeout(() => setSuccessMessage(null), 3000);
+       setIsControllingPoll(false);
+       return;
+     }
+     
       // Update the poll state to voting
       const { error } = await supabase
         .from('activations')

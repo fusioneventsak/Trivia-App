@@ -348,6 +348,25 @@ export default function MobileController() {
       
       console.log('Starting poll voting for activation:', currentActivation);
       
+     // First, check the current state to avoid unnecessary updates
+     const { data: currentState, error: stateError } = await supabase
+       .from('activations')
+       .select('poll_state')
+       .eq('id', currentActivation)
+       .single();
+       
+     if (stateError) throw stateError;
+     
+     // If already in the desired state, just update local state
+     if (currentState?.poll_state === 'voting') {
+       console.log('Poll is already in voting state');
+       setPollState('voting');
+       setSuccessMessage('Poll is already in voting state');
+       setTimeout(() => setSuccessMessage(null), 3000);
+       setIsControllingPoll(false);
+       return;
+     }
+     
       // Update the poll state to voting
       const { error } = await supabase
         .from('activations')
