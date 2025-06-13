@@ -796,8 +796,33 @@ export default function Results() {
                     <div className="space-y-4">
                       <PollStateIndicator state={pollState} className="mb-2" />
                       
-                      {/* Show results when voting is in progress or closed */}
-                      {pollState !== 'pending' && (
+                      {pollState === 'pending' ? (
+                        /* Show question and options in a grid when pending */
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {currentActivation.options?.map((option, index) => (
+                            <div
+                              key={index}
+                              className="p-4 rounded-lg bg-white/20 text-white"
+                            >
+                              <div className="flex items-center gap-3">
+                                {option.media_type !== 'none' && option.media_url && (
+                                  <div className="w-10 h-10 rounded-full overflow-hidden flex-shrink-0 bg-black/20">
+                                    <MediaDisplay
+                                      url={option.media_url}
+                                      type={option.media_type || 'image'}
+                                      alt={option.text}
+                                      className="w-full h-full object-cover"
+                                      fallbackText="!"
+                                    />
+                                  </div>
+                                )}
+                                <span className="font-medium">{option.text}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        /* Show animated poll results when voting or closed */
                         <PollDisplay
                           options={currentActivation.options || []}
                           votes={pollVotesByText}
@@ -809,13 +834,6 @@ export default function Results() {
                           pollState={pollState}
                           lastUpdated={pollLastUpdated}
                         />
-                      )}
-                      
-                      {pollState === 'pending' && (
-                        <div className="text-center text-white py-4 bg-white/10 rounded-lg">
-                          <Clock className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                          <p className="text-lg">Waiting for host to start voting...</p>
-                        </div>
                       )}
                     </div>
                   )}

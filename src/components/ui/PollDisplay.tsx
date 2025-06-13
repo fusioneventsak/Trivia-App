@@ -50,11 +50,6 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
   pollState = 'closed',
   lastUpdated
 }) => {
-  // Only show the poll results when voting is in progress or closed
-  if (pollState === 'pending') {
-    return null;
-  }
-
   // Use provided getStorageUrl function or fall back to the utility function
   const getStorageUrlFn = customGetStorageUrl || getStorageUrl;
   
@@ -470,8 +465,20 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
   return (
     <div className={cn("p-4 bg-white/10 rounded-lg", className)}>
       <div className="flex items-center justify-between mb-3 border-b border-white/10 pb-2">
-        <h3 className="font-semibold text-white">
-          {pollState === 'closed' ? 'Final Results' : 'Live Results'}
+        <h3 className="font-semibold text-white flex items-center">
+          {pollState === 'closed' ? (
+            <>Final Results</>
+          ) : pollState === 'voting' ? (
+            <>
+              <span className="relative flex h-2 w-2 mr-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+              </span>
+              Live Results
+            </>
+          ) : (
+            <>Poll Results</>
+          )}
         </h3>
         <div className="text-sm text-white/80 flex items-center">
           {animatedTotalVotes} votes
