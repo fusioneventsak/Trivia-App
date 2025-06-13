@@ -50,6 +50,11 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
   pollState = 'closed',
   lastUpdated
 }) => {
+  // Only show the poll results when voting is in progress or closed
+  if (pollState === 'pending') {
+    return null;
+  }
+
   // Use provided getStorageUrl function or fall back to the utility function
   const getStorageUrlFn = customGetStorageUrl || getStorageUrl;
   

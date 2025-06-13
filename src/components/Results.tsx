@@ -794,45 +794,7 @@ export default function Results() {
                   {currentActivation.type === 'poll' && (
                     /* Poll display */
                     <div className="space-y-4">
-                      <div className="flex justify-between items-center">
-                        <PollStateIndicator state={pollState} />
-                        {pollState === 'voting' && (
-                          <div className="text-xs text-white/80 flex items-center">
-                            <span className="relative flex h-2 w-2 mr-1">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                              <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                            </span>
-                            Live voting in progress
-                          </div>
-                        )}
-                      </div>
-                      
-                      {/* Always show options, but with different states */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-                        {currentActivation.options?.map((option, index) => (
-                          <div
-                            key={index}
-                            className={`p-4 rounded-lg bg-white/20 transition-all duration-300 ${
-                              pollState === 'pending' ? 'opacity-70' : 'opacity-100'
-                            }`}
-                          >
-                            <div className="flex items-center gap-3">
-                              {option.media_type !== 'none' && option.media_url && (
-                                <div className="w-10 h-10 rounded-full overflow-hidden flex-shrink-0 bg-black/20">
-                                  <MediaDisplay
-                                    url={option.media_url}
-                                    type={option.media_type || 'image'}
-                                    alt={option.text}
-                                    className="w-full h-full object-cover"
-                                    fallbackText="!"
-                                  />
-                                </div>
-                              )}
-                              <span className="text-white font-medium">{option.text}</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
+                      <PollStateIndicator state={pollState} className="mb-2" />
                       
                       {/* Show results when voting is in progress or closed */}
                       {pollState !== 'pending' && (
