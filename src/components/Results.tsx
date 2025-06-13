@@ -1,6 +1,4 @@
-Here's the fixed version with all missing closing brackets added:
-
-```javascript
+import React, { useState, useEffect, useRef } from 'react';
                                   </div>
                                 )}
                                 <div className="flex-1 font-medium">{option.text}</div>
@@ -79,5 +77,3 @@ Here's the fixed version with all missing closing brackets added:
     </div>
   );
 }
-```
-                
