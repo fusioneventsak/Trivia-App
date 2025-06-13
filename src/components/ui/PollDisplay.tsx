@@ -1,8 +1,8 @@
-// src/components/ui/PollDisplay.tsx
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { cn, getStorageUrl } from '../../lib/utils';
 import MediaDisplay from './MediaDisplay';
-import { CheckCircle } from 'lucide-react';
+import { CheckCircle, Crown, Activity } from 'lucide-react';
+import { animateValue, stagger } from '../../lib/animation-utils';
 
 interface PollOption {
   text: string;
@@ -30,6 +30,8 @@ interface PollDisplayProps {
   };
   compact?: boolean;
   className?: string;
+  pollState?: 'pending' | 'voting' | 'closed';
+  lastUpdated?: number;
 }
 
 const PollDisplay: React.FC<PollDisplayProps> = ({
@@ -43,10 +45,144 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
   getStorageUrl: customGetStorageUrl,
   themeColors = {},
   compact = false,
-  className = ''
+  className = '',
+  pollState = 'closed',
+  lastUpdated
 }) => {
   // Use provided getStorageUrl function or fall back to the utility function
   const getStorageUrlFn = customGetStorageUrl || getStorageUrl;
+  
+  // State for animated values
+  const [animatedVotes, setAnimatedVotes] = useState<PollVotes>({});
+  const [animatedTotalVotes, setAnimatedTotalVotes] = useState(0);
+  const [leadingOptionId, setLeadingOptionId] = useState<string | null>(null);
+  const [isAnimating, setIsAnimating] = useState(false);
+  const [barWidths, setBarWidths] = useState<{[key: string]: number}>({});
+  
+  // Refs for tracking previous values
+  const prevVotesRef = useRef<PollVotes>({});
+  const prevTotalVotesRef = useRef<number>(0);
+  const animationsRef = useRef<{[key: string]: number}>({});
+  
+  // Initialize animated values
+  useEffect(() => {
+    setAnimatedVotes(votes);
+    setAnimatedTotalVotes(totalVotes);
+    prevVotesRef.current = votes;
+    prevTotalVotesRef.current = totalVotes;
+    
+    // Calculate initial bar widths
+    const initialWidths: {[key: string]: number} = {};
+    options.forEach(option => {
+      const optionId = option.id || option.text;
+      const voteCount = votes[optionId] || 0;
+      const percentage = totalVotes > 0 ? (voteCount / totalVotes * 100) : 0;
+      initialWidths[optionId] = Math.max(percentage, 4); // Minimum 4% for visibility
+    });
+    setBarWidths(initialWidths);
+    
+    // Determine leading option
+    updateLeadingOption(votes);
+  }, []);
+  
+  // Update leading option
+  const updateLeadingOption = (currentVotes: PollVotes) => {
+    let maxVotes = 0;
+    let leaderId: string | null = null;
+    
+    options.forEach(option => {
+      const optionId = option.id || option.text;
+      const voteCount = currentVotes[optionId] || 0;
+      
+      if (voteCount > maxVotes) {
+        maxVotes = voteCount;
+        leaderId = optionId;
+      }
+    });
+    
+    setLeadingOptionId(leaderId);
+  };
+
+  // Animate when votes change
+  useEffect(() => {
+    // Check if votes have changed
+    let hasChanged = totalVotes !== prevTotalVotesRef.current;
+    
+    if (!hasChanged) {
+      // Check each option for changes
+      for (const option of options) {
+        const optionId = option.id || option.text;
+        if ((votes[optionId] || 0) !== (prevVotesRef.current[optionId] || 0)) {
+          hasChanged = true;
+          break;
+        }
+      }
+    }
+    
+    if (hasChanged) {
+      setIsAnimating(true);
+      
+      // Animate total votes
+      if (totalVotes !== prevTotalVotesRef.current) {
+        animateValue(
+          prevTotalVotesRef.current,
+          totalVotes,
+          1000,
+          (value) => setAnimatedTotalVotes(Math.round(value))
+        );
+      }
+      
+      // Cancel any ongoing animations
+      Object.values(animationsRef.current).forEach(id => {
+        cancelAnimationFrame(id);
+      });
+      animationsRef.current = {};
+      
+      // Animate individual vote counts with staggered start
+      stagger(
+        options,
+        (option, index) => {
+          const optionId = option.id || option.text;
+          const prevCount = prevVotesRef.current[optionId] || 0;
+          const newCount = votes[optionId] || 0;
+          
+          if (prevCount !== newCount) {
+            animateValue(
+              prevCount,
+              newCount,
+              800,
+              (value) => {
+                setAnimatedVotes(prev => ({
+                  ...prev,
+                  [optionId]: Math.round(value)
+                }));
+              }
+            );
+          }
+          
+          // Animate bar widths
+          const percentage = totalVotes > 0 ? ((votes[optionId] || 0) / totalVotes * 100) : 0;
+          setBarWidths(prev => ({
+            ...prev,
+            [optionId]: Math.max(percentage, 4) // Minimum 4% for visibility
+          }));
+        },
+        100 // 100ms stagger between each option
+      );
+      
+      // Update leading option
+      updateLeadingOption(votes);
+      
+      // Update refs for next comparison
+      prevVotesRef.current = { ...votes };
+      prevTotalVotesRef.current = totalVotes;
+      
+      // Reset animation flag after all animations complete
+      setTimeout(() => {
+        setIsAnimating(false);
+      }, 1000 + (options.length * 100));
+    }
+  }, [votes, totalVotes, options]);
 
   // Helper to get display label based on format
   const getDisplayLabel = (voteCount: number, percentage: string): string => {
@@ -76,11 +212,11 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
   // Helper to get vote count for an option
   const getVoteCount = (option: PollOption): number => {
     // Try by option ID first if available
-    if (option.id && votes[option.id] !== undefined) {
-      return votes[option.id];
+    if (option.id && animatedVotes[option.id] !== undefined) {
+      return animatedVotes[option.id];
     }
     // Fall back to option text
-    return votes[option.text] || 0;
+    return animatedVotes[option.text] || 0;
   };
 
   // Check if option is selected
@@ -97,14 +233,15 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
     let currentAngle = 0;
     const pieSlices = options.map((option, index) => {
       const voteCount = getVoteCount(option);
-      const percentage = totalVotes > 0 ? (voteCount / totalVotes) * 360 : 0;
+      const percentage = animatedTotalVotes > 0 ? (voteCount / animatedTotalVotes * 360) : 0;
       const slice = {
         option,
         startAngle: currentAngle,
         endAngle: currentAngle + percentage,
-        percentage: totalVotes > 0 ? (voteCount / totalVotes * 100) : 0,
+        percentage: animatedTotalVotes > 0 ? (voteCount / animatedTotalVotes * 100) : 0,
         voteCount,
-        color: getColorForIndex(index)
+        color: getColorForIndex(index),
+        isLeading: option.id === leadingOptionId || option.text === leadingOptionId
       };
       currentAngle += percentage;
       return slice;
@@ -114,7 +251,18 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
       <div className={cn("p-4 bg-white/10 rounded-lg", className)}>
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-semibold text-white">Poll Results</h3>
-          <div className="text-sm text-white/80">{totalVotes} votes</div>
+          <div className="text-sm text-white/80 flex items-center">
+            {animatedTotalVotes} votes
+            {pollState === 'voting' && (
+              <span className="ml-2 flex items-center">
+                <span className="relative flex h-2 w-2 mr-1">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                </span>
+                <span className="text-green-300 text-xs">Live</span>
+              </span>
+            )}
+          </div>
         </div>
       
         <div className="flex flex-col items-center">
@@ -148,32 +296,50 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
                     fill={slice.color}
                     stroke="white"
                     strokeWidth="2"
-                    className={isOptionSelected(slice.option) ? 'opacity-100' : 'opacity-80'}
+                    className={cn(
+                      "transition-opacity duration-300",
+                      isOptionSelected(slice.option) ? 'opacity-100' : 'opacity-80',
+                      slice.isLeading && 'filter drop-shadow-lg'
+                    )}
                   />
                 );
               })}
             </svg>
+            
+            {/* Leading indicator */}
+            {leadingOptionId && (
+              <div className="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-yellow-400 text-yellow-900 px-2 py-1 rounded-full text-xs font-bold flex items-center shadow-lg animate-pulse">
+                <Crown className="w-3 h-3 mr-1" />
+                Leading!
+              </div>
+            )}
           </div>
           
           {/* Legend */}
           <div className="mt-4 space-y-2 w-full">
             {options.map((option, index) => {
               const voteCount = getVoteCount(option);
-              const percentage = totalVotes > 0 ? (voteCount / totalVotes * 100).toFixed(1) : '0.0';
+              const percentage = animatedTotalVotes > 0 ? (voteCount / animatedTotalVotes * 100).toFixed(1) : '0.0';
               const isSelected = isOptionSelected(option);
+              const isLeading = option.id === leadingOptionId || option.text === leadingOptionId;
               
               return (
-                <div key={index} className="flex items-center gap-2">
+                <div key={index} className={cn(
+                  "flex items-center gap-2 p-2 rounded-lg transition-colors duration-300",
+                  isLeading && "bg-yellow-500/10",
+                  isSelected && "bg-white/10"
+                )}>
                   <div 
                     className="w-4 h-4 rounded"
                     style={{ backgroundColor: getColorForIndex(index) }}
                   />
                   <div className="flex items-center flex-1">
                     {isSelected && <CheckCircle className="w-3 h-3 mr-1 text-green-400" />}
+                    {isLeading && <Crown className="w-3 h-3 mr-1 text-yellow-400" />}
                     {option.media_type !== 'none' && option.media_url && (
                       <MediaDisplay
                         url={option.media_url}
-                        type={option.media_type}
+                        type={option.media_type || 'image'}
                         alt={option.text}
                         className="w-6 h-6 rounded-full object-cover mr-1"
                       />
@@ -187,6 +353,14 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
               );
             })}
           </div>
+          
+          {/* Live update indicator */}
+          {pollState === 'voting' && lastUpdated && (
+            <div className="mt-3 text-xs text-white/60 flex items-center justify-center">
+              <Activity className="w-3 h-3 mr-1" />
+              <span>Live updates</span>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -198,27 +372,44 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
       <div className={cn("p-4 bg-white/10 rounded-lg", className)}>
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-semibold text-white">Poll Results</h3>
-          <div className="text-sm text-white/80">{totalVotes} votes</div>
+          <div className="text-sm text-white/80 flex items-center">
+            {animatedTotalVotes} votes
+            {pollState === 'voting' && (
+              <span className="ml-2 flex items-center">
+                <span className="relative flex h-2 w-2 mr-1">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                </span>
+                <span className="text-green-300 text-xs">Live</span>
+              </span>
+            )}
+          </div>
         </div>
         
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 h-48">
           {options.map((option, index) => {
             const voteCount = getVoteCount(option);
-            const percentage = totalVotes > 0 ? (voteCount / totalVotes * 100) : 0;
+            const percentage = animatedTotalVotes > 0 ? (voteCount / animatedTotalVotes * 100) : 0;
             const color = getColorForIndex(index);
             const isSelected = isOptionSelected(option);
+            const isLeading = option.id === leadingOptionId || option.text === leadingOptionId;
+            const optionId = option.id || option.text;
+            const barHeight = barWidths[optionId] || 0;
             
             return (
               <div key={index} className="flex flex-col items-center h-full">
-                <div className="text-sm text-white mb-1">
+                <div className="text-sm text-white mb-1 flex items-center">
                   {getDisplayLabel(voteCount, percentage.toFixed(1))}
+                  {isLeading && (
+                    <Crown className="w-3 h-3 ml-1 text-yellow-400" />
+                  )}
                 </div>
                 
                 <div className="w-full flex-grow bg-white/20 rounded-t-lg relative flex justify-center">
                   <div 
-                    className="absolute bottom-0 w-full transition-all duration-500 ease-out rounded-t-lg"
+                    className="absolute bottom-0 w-full transition-all duration-1000 ease-out rounded-t-lg"
                     style={{ 
-                      height: `${Math.max(percentage, 2)}%`,
+                      height: `${barHeight}%`,
                       backgroundColor: color,
                       border: isSelected ? '2px solid white' : 'none'
                     }}
@@ -235,14 +426,14 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
                 
                 <div className="text-xs text-white mt-2 text-center px-1">
                   {option.media_type !== 'none' && option.media_url && (
-                    <img
-                      src={getStorageUrlFn(option.media_url)}
-                      alt=""
-                      className="w-4 h-4 rounded-full object-cover mx-auto mb-1"
-                      onError={(e) => {
-                        e.currentTarget.style.display = 'none';
-                      }}
-                    />
+                    <div className="w-4 h-4 rounded-full overflow-hidden mx-auto mb-1">
+                      <MediaDisplay
+                        url={option.media_url}
+                        type={option.media_type || 'image'}
+                        alt={option.text}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
                   )}
                   <div className="flex items-center justify-center">
                     {isSelected && <CheckCircle className="w-3 h-3 mr-1 text-green-400" />}
@@ -253,6 +444,14 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
             );
           })}
         </div>
+        
+        {/* Live update indicator */}
+        {pollState === 'voting' && lastUpdated && (
+          <div className="mt-3 text-xs text-white/60 flex items-center justify-center">
+            <Activity className="w-3 h-3 mr-1" />
+            <span>Live updates</span>
+          </div>
+        )}
       </div>
     );
   }
@@ -262,24 +461,42 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
     <div className={cn("p-4 bg-white/10 rounded-lg", className)}>
       <div className="flex items-center justify-between mb-3">
         <h3 className="font-semibold text-white">Poll Results</h3>
-        <div className="text-sm text-white/80">{totalVotes} votes</div>
+        <div className="text-sm text-white/80 flex items-center">
+          {animatedTotalVotes} votes
+          {pollState === 'voting' && (
+            <span className="ml-2 flex items-center">
+              <span className="relative flex h-2 w-2 mr-1">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+              </span>
+              <span className="text-green-300 text-xs">Live</span>
+            </span>
+          )}
+        </div>
       </div>
       
       <div className="space-y-4">
         {options.map((option, index) => {
           const voteCount = getVoteCount(option);
-          const percentage = totalVotes > 0 ? (voteCount / totalVotes * 100) : 0;
+          const percentage = animatedTotalVotes > 0 ? (voteCount / animatedTotalVotes * 100) : 0;
           const isSelected = isOptionSelected(option);
+          const isLeading = option.id === leadingOptionId || option.text === leadingOptionId;
+          const optionId = option.id || option.text;
+          const barWidth = barWidths[optionId] || 0;
           
           return (
-            <div key={index} className="space-y-1">
+            <div key={index} className={cn(
+              "space-y-1",
+              isLeading && "animate-pulse-slow"
+            )}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center">
                   {isSelected && <CheckCircle className="w-4 h-4 mr-1 text-green-400" />}
+                  {isLeading && <Crown className="w-4 h-4 mr-1 text-yellow-400" />}
                   {option.media_type !== 'none' && option.media_url && (
                     <MediaDisplay
                       url={getStorageUrlFn(option.media_url)}
-                      type={option.media_type}
+                      type={option.media_type || 'image'}
                       alt={option.text}
                       className="w-8 h-8 rounded-full object-cover mr-2 border border-white/30"
                     />
@@ -293,9 +510,9 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
               
               <div className="w-full bg-white/20 rounded-full h-6 overflow-hidden">
                 <div 
-                  className="h-full transition-all duration-500 ease-out flex items-center px-2"
+                  className="h-full transition-all duration-1000 ease-out flex items-center px-2"
                   style={{ 
-                    width: `${Math.max(percentage, 4)}%`,
+                    width: `${barWidth}%`,
                     backgroundColor: getColorForIndex(index),
                     border: isSelected ? '2px solid white' : 'none'
                   }}
@@ -312,9 +529,17 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
         })}
       </div>
       
-      {totalVotes === 0 && (
+      {animatedTotalVotes === 0 && (
         <div className="text-center text-white/60 mt-4">
           No votes yet
+        </div>
+      )}
+      
+      {/* Live update indicator */}
+      {pollState === 'voting' && lastUpdated && (
+        <div className="mt-3 text-xs text-white/60 flex items-center justify-center">
+          <Activity className="w-3 h-3 mr-1" />
+          <span>Live updates</span>
         </div>
       )}
     </div>

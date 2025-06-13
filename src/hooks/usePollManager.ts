@@ -27,6 +27,7 @@ interface UsePollManagerProps {
   activationId: string | null;
   options?: PollOption[];
   playerId?: string | null;
+  debugMode?: boolean;
 }
 
 interface UsePollManagerReturn {
@@ -37,6 +38,8 @@ interface UsePollManagerReturn {
   selectedOptionId: string | null;
   pollState: 'pending' | 'voting' | 'closed';
   isLoading: boolean;
+  lastUpdated: number;
+  pollingInterval: number;
   submitVote: (optionId: string) => Promise<{ success: boolean; error?: string }>;
   resetPoll: () => void;
 }
@@ -44,7 +47,8 @@ interface UsePollManagerReturn {
 export function usePollManager({ 
   activationId, 
   options = [], 
-  playerId 
+  playerId,
+  debugMode = false
 }: UsePollManagerProps): UsePollManagerReturn {
   const [votes, setVotes] = useState<PollVoteCount>({});
   const [votesByText, setVotesByText] = useState<{ [text: string]: number }>({});
@@ -52,24 +56,35 @@ export function usePollManager({
   const [selectedOptionId, setSelectedOptionId] = useState<string | null>(null);
   const [pollState, setPollState] = useState<'pending' | 'voting' | 'closed'>('pending');
   const [isLoading, setIsLoading] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<number>(Date.now());
+  const [pollingInterval, setPollingInterval] = useState<number>(2000); // Start with 2 seconds
   
   const currentActivationIdRef = useRef<string | null>(null);
   const debugIdRef = useRef<string>(`poll-${Math.random().toString(36).substring(2, 7)}`);
-  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const pollingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastFetchTimeRef = useRef<number>(0);
   const errorCountRef = useRef<number>(0);
   const voteCountRef = useRef<number>(0);
+  const noChangeCountRef = useRef<number>(0);
+  const lastVoteCountRef = useRef<number>(0);
+  const lastVotesRef = useRef<PollVoteCount>({});
+  const lastVotesByTextRef = useRef<{ [text: string]: number }>({});
+  const subscriptionRef = useRef<any>(null);
 
   // Initialize poll data
   const initializePoll = useCallback(async () => {
     if (!activationId) return;
     
-    console.log(`[${debugIdRef.current}] Initializing poll for activation: ${activationId}, player: ${playerId || 'none'}`);
+    if (debugMode) {
+      console.log(`[${debugIdRef.current}] Initializing poll for activation: ${activationId}, player: ${playerId || 'none'}, interval: ${pollingInterval}ms`);
+    }
     
     // Don't fetch too frequently (throttle to once per second)
     const now = Date.now();
     if (now - lastFetchTimeRef.current < 1000) {
-      console.log(`[${debugIdRef.current}] Skipping poll fetch - throttled`);
+      if (debugMode) {
+        console.log(`[${debugIdRef.current}] Skipping poll fetch - throttled`);
+      }
       return;
     }
     lastFetchTimeRef.current = now;
@@ -88,10 +103,26 @@ export function usePollManager({
       if (activationError) {
         console.error(`[${debugIdRef.current}] Error fetching activation:`, activationError);
         errorCountRef.current++;
+        
+        // If we've had multiple consecutive errors, increase polling interval
+        if (errorCountRef.current >= 3) {
+          const newInterval = Math.min(30000, pollingInterval * 2); // Max 30 seconds
+          if (newInterval !== pollingInterval) {
+            if (debugMode) {
+              console.log(`[${debugIdRef.current}] Increasing polling interval due to errors: ${pollingInterval}ms -> ${newInterval}ms`);
+            }
+            setPollingInterval(newInterval);
+          }
+        }
         return;
       } else if (activation) {
-        console.log(`[${debugIdRef.current}] Activation fetched successfully. Poll state: ${activation.poll_state}`);
+        if (debugMode) {
+          console.log(`[${debugIdRef.current}] Activation fetched successfully. Poll state: ${activation.poll_state}`);
+        }
         setPollState(activation.poll_state || 'pending');
+        
+        // Reset error count on successful fetch
+        errorCountRef.current = 0;
         
         // Initialize vote counts
         const voteCounts: PollVoteCount = {};
@@ -121,7 +152,49 @@ export function usePollManager({
           errorCountRef.current++;
           return;
         } else if (voteData) {
-          console.log(`[${debugIdRef.current}] Fetched ${voteData.length} votes for activation ${activationId}`);
+          const currentVoteCount = voteData.length;
+          
+          // Check if vote count has changed
+          if (currentVoteCount === lastVoteCountRef.current) {
+            // No change in vote count
+            noChangeCountRef.current++;
+            
+            if (debugMode) {
+              console.log(`[${debugIdRef.current}] No change in vote count (${currentVoteCount}), consecutive no-changes: ${noChangeCountRef.current}`);
+            }
+            
+            // If no changes for several polls, increase polling interval
+            if (noChangeCountRef.current >= 3 && pollState === 'voting') {
+              const newInterval = Math.min(10000, pollingInterval * 1.5); // Max 10 seconds
+              if (newInterval !== pollingInterval) {
+                if (debugMode) {
+                  console.log(`[${debugIdRef.current}] Increasing polling interval due to inactivity: ${pollingInterval}ms -> ${newInterval}ms`);
+                }
+                setPollingInterval(newInterval);
+              }
+            }
+            
+            // If no changes and we already have vote data, skip processing
+            if (Object.keys(lastVotesRef.current).length > 0) {
+              setIsLoading(false);
+              return;
+            }
+          } else {
+            // Vote count changed, reset counters and polling interval
+            noChangeCountRef.current = 0;
+            lastVoteCountRef.current = currentVoteCount;
+            
+            if (pollingInterval > 2000) {
+              if (debugMode) {
+                console.log(`[${debugIdRef.current}] Vote count changed, resetting polling interval to 2000ms`);
+              }
+              setPollingInterval(2000);
+            }
+          }
+          
+          if (debugMode) {
+            console.log(`[${debugIdRef.current}] Fetched ${voteData.length} votes for activation ${activationId}`);
+          }
           
           // Count votes
           voteData.forEach((vote: PollVote) => {
@@ -144,16 +217,20 @@ export function usePollManager({
           
           // Store the vote count for comparison
           voteCountRef.current = voteData.length;
+          
+          // Update refs for comparison in next poll
+          lastVotesRef.current = voteCounts;
+          lastVotesByTextRef.current = textVoteCounts;
         }
 
         setVotes(voteCounts);
         setVotesByText(textVoteCounts);
+        setLastUpdated(Date.now());
         
-        console.log(`[${debugIdRef.current}] Poll initialized with ${Object.values(textVoteCounts).reduce((sum, count) => sum + count, 0)} total votes`);
-        console.log(`[${debugIdRef.current}] Vote counts by text:`, textVoteCounts);
-        
-        // Reset error count on successful fetch
-        errorCountRef.current = 0;
+        if (debugMode) {
+          console.log(`[${debugIdRef.current}] Poll initialized with ${Object.values(textVoteCounts).reduce((sum, count) => sum + count, 0)} total votes`);
+          console.log(`[${debugIdRef.current}] Vote counts by text:`, textVoteCounts);
+        }
       }
     } catch (error) {
       console.error(`[${debugIdRef.current}] Error initializing poll:`, error);
@@ -162,64 +239,159 @@ export function usePollManager({
     } finally {
       setIsLoading(false);
     }
-  }, [activationId, options, playerId]);
+  }, [activationId, options, playerId, pollingInterval, debugMode]);
 
   // Reset poll state
   const resetPoll = useCallback(() => {
-    console.log(`[${debugIdRef.current}] Resetting poll state`);
+    if (debugMode) {
+      console.log(`[${debugIdRef.current}] Resetting poll state`);
+    }
     setVotes({});
     setVotesByText({});
     setHasVoted(false);
     setSelectedOptionId(null);
     setPollState('pending');
+    setPollingInterval(2000); // Reset to default interval
+    noChangeCountRef.current = 0;
+    lastVoteCountRef.current = 0;
+    errorCountRef.current = 0;
+    lastVotesRef.current = {};
+    lastVotesByTextRef.current = {};
 
-    // Clear polling interval
-    if (pollingIntervalRef.current) {
-      clearInterval(pollingIntervalRef.current);
-      pollingIntervalRef.current = null;
+    // Clear polling timeout
+    if (pollingTimeoutRef.current) {
+      clearTimeout(pollingTimeoutRef.current);
+      pollingTimeoutRef.current = null;
     }
     
-    // Reset error count
-    errorCountRef.current = 0;
-  }, []);
+    // Clear subscription
+    if (subscriptionRef.current) {
+      subscriptionRef.current.unsubscribe();
+      subscriptionRef.current = null;
+    }
+  }, [debugMode]);
 
   // Effect to handle activation changes
   useEffect(() => {
     if (activationId !== currentActivationIdRef.current) {
-      console.log(`[${debugIdRef.current}] Activation changed from ${currentActivationIdRef.current} to ${activationId}`);
+      if (debugMode) {
+        console.log(`[${debugIdRef.current}] Activation changed from ${currentActivationIdRef.current} to ${activationId}`);
+      }
       currentActivationIdRef.current = activationId;
       resetPoll();
     }
-  }, [activationId, resetPoll]);
+  }, [activationId, resetPoll, debugMode]);
 
-  // Set up real-time subscriptions
+  // Set up polling and subscriptions
   useEffect(() => {
     if (!activationId) return;
-    console.log(`[${debugIdRef.current}] Setting up poll for activation ${activationId}`);
+    
+    if (debugMode) {
+      console.log(`[${debugIdRef.current}] Setting up poll for activation ${activationId}`);
+    }
     
     // Initial fetch
     initializePoll();
     
-    // Set up polling interval - more reliable than subscriptions in some cases
-    const pollInterval = setInterval(() => {
-      initializePoll();
-    }, 2000); // Poll every 2 seconds
+    // Set up polling with dynamic interval
+    const setupPolling = () => {
+      // Clear any existing timeout
+      if (pollingTimeoutRef.current) {
+        clearTimeout(pollingTimeoutRef.current);
+      }
+      
+      // Set new timeout with current interval
+      pollingTimeoutRef.current = setTimeout(() => {
+        initializePoll().finally(() => {
+          // Continue polling
+          setupPolling();
+        });
+      }, pollingInterval);
+    };
     
-    pollingIntervalRef.current = pollInterval;
+    // Start polling
+    setupPolling();
+    
+    // Set up subscription for real-time updates as a fallback/enhancement
+    try {
+      // Subscribe to poll votes for this activation
+      subscriptionRef.current = supabase.channel(`poll_votes_${activationId}`)
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'poll_votes',
+          filter: `activation_id=eq.${activationId}`
+        }, () => {
+          // When a new vote comes in, reset to fast polling
+          if (pollingInterval > 2000) {
+            if (debugMode) {
+              console.log(`[${debugIdRef.current}] New vote detected via subscription, resetting polling interval to 2000ms`);
+            }
+            setPollingInterval(2000);
+            noChangeCountRef.current = 0;
+          }
+          
+          // Trigger an immediate poll to get the latest data
+          initializePoll();
+        })
+        .subscribe();
+        
+      // Subscribe to activation changes for poll state updates
+      supabase.channel(`activation_${activationId}`)
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'activations',
+          filter: `id=eq.${activationId}`
+        }, (payload) => {
+          if (payload.new && payload.new.poll_state !== payload.old?.poll_state) {
+            if (debugMode) {
+              console.log(`[${debugIdRef.current}] Poll state changed: ${payload.old?.poll_state} -> ${payload.new.poll_state}`);
+            }
+            setPollState(payload.new.poll_state || 'pending');
+            
+            // Reset to fast polling when state changes
+            if (pollingInterval > 2000) {
+              setPollingInterval(2000);
+              noChangeCountRef.current = 0;
+            }
+            
+            // Trigger an immediate poll
+            initializePoll();
+          }
+        })
+        .subscribe();
+    } catch (error) {
+      console.error(`[${debugIdRef.current}] Error setting up subscriptions:`, error);
+      // If subscriptions fail, we still have polling as a fallback
+    }
     
     // Cleanup
     return () => {
-      console.log(`[${debugIdRef.current}] Cleaning up poll for activation ${activationId}`);
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-        pollingIntervalRef.current = null;
+      if (debugMode) {
+        console.log(`[${debugIdRef.current}] Cleaning up poll for activation ${activationId}`);
+      }
+      
+      // Clear polling timeout
+      if (pollingTimeoutRef.current) {
+        clearTimeout(pollingTimeoutRef.current);
+        pollingTimeoutRef.current = null;
+      }
+      
+      // Unsubscribe from channels
+      if (subscriptionRef.current) {
+        subscriptionRef.current.unsubscribe();
+        subscriptionRef.current = null;
       }
     };
-  }, [activationId, playerId, initializePoll]);
+  }, [activationId, pollingInterval, initializePoll, debugMode]);
 
   // Submit vote
   const submitVote = useCallback(async (optionId: string): Promise<{ success: boolean; error?: string }> => {
-    console.log(`[${debugIdRef.current}] Submitting vote for option ${optionId}`);
+    if (debugMode) {
+      console.log(`[${debugIdRef.current}] Submitting vote for option ${optionId}`);
+    }
+    
     if (!activationId || !playerId) {
       return { success: false, error: 'Missing activation or player ID' };
     }
@@ -241,7 +413,9 @@ export function usePollManager({
           return { success: false, error: 'Invalid option' };
         }
 
-        console.log(`[${debugIdRef.current}] Submitting vote:`, { activationId, playerId, optionId, optionText: option.text });
+        if (debugMode) {
+          console.log(`[${debugIdRef.current}] Submitting vote:`, { activationId, playerId, optionId, optionText: option.text });
+        }
 
         // Submit the vote
         const { error } = await supabase
@@ -256,7 +430,9 @@ export function usePollManager({
         if (error) {
           // Check for duplicate vote
           if (error.code === '23505') {
-            console.log(`[${debugIdRef.current}] Duplicate vote detected`);
+            if (debugMode) {
+              console.log(`[${debugIdRef.current}] Duplicate vote detected`);
+            }
             return { success: false, error: 'You have already voted in this poll' };
           }
           throw error;
@@ -276,11 +452,22 @@ export function usePollManager({
           ...prev,
           [option.text]: (prev[option.text] || 0) + 1
         }));
-
-        console.log(`[${debugIdRef.current}] Vote submitted successfully`);
+        
+        // Reset to fast polling
+        if (pollingInterval > 2000) {
+          if (debugMode) {
+            console.log(`[${debugIdRef.current}] Vote submitted, resetting polling interval to 2000ms`);
+          }
+          setPollingInterval(2000);
+          noChangeCountRef.current = 0;
+        }
         
         // Force a refresh to get the latest data
         setTimeout(initializePoll, 500);
+        
+        if (debugMode) {
+          console.log(`[${debugIdRef.current}] Vote submitted successfully`);
+        }
         
         return { success: true };
       }, 3);
@@ -303,7 +490,9 @@ export function usePollManager({
           localStorage.setItem('pendingPollVotes', JSON.stringify(pendingVotes));
           
           // Update UI optimistically
-          console.log(`[${debugIdRef.current}] Vote saved locally due to network error`);
+          if (debugMode) {
+            console.log(`[${debugIdRef.current}] Vote saved locally due to network error`);
+          }
           setHasVoted(true);
           setSelectedOptionId(optionId);
           
@@ -326,14 +515,16 @@ export function usePollManager({
         error: error.message || 'Failed to submit vote. Please try again.' 
       };
     }
-  }, [activationId, playerId, hasVoted, pollState, options, initializePoll]);
+  }, [activationId, playerId, hasVoted, pollState, options, pollingInterval, initializePoll, debugMode]);
 
   // Calculate total votes
   const getTotalVotes = useCallback((): number => {
     // Use votesByText as the source of truth
-    console.log(`[${debugIdRef.current}] Calculating total votes from:`, votesByText);
+    if (debugMode) {
+      console.log(`[${debugIdRef.current}] Calculating total votes from:`, votesByText);
+    }
     return Object.values(votesByText).reduce((sum, count) => sum + count, 0);
-  }, [votesByText]);
+  }, [votesByText, debugMode]);
 
   return {
     votes,
@@ -343,6 +534,8 @@ export function usePollManager({
     selectedOptionId,
     pollState,
     isLoading,
+    lastUpdated,
+    pollingInterval,
     submitVote,
     resetPoll
   };
