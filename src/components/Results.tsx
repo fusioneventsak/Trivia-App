@@ -98,8 +98,7 @@ export default function Results() {
     isLoading: pollLoading,
     lastUpdated: pollLastUpdated,
     pollingInterval,
-    initializePoll,
-    cleanup: cleanupPoll
+    resetPoll
   } = usePollManager({
     activationId: currentActivation?.id || null,
     options: currentActivation?.options || [],
@@ -107,13 +106,13 @@ export default function Results() {
     debugMode
   });
 
-  // Initialize poll when activation changes
+  // Reset poll when activation changes
   useEffect(() => {
     // Cleanup will happen automatically inside the hook
     // when activationId changes
     return () => {
       // If needed, we can call resetPoll here
-      if (currentActivation?.type === 'poll') {
+      if (currentActivation?.type === 'poll' && resetPoll) {
         resetPoll();
       }
     };
@@ -425,12 +424,11 @@ export default function Results() {
                           options={currentActivation.options || []}
                           votes={pollVotesByText}
                           totalVotes={totalVotes}
+                          pollState={pollState}
+                          lastUpdated={pollLastUpdated}
                           displayType={currentActivation.poll_display_type || 'bar'}
                           resultFormat={currentActivation.poll_result_format || 'percentage'}
                           isLoading={pollLoading}
-                          pollState={pollState}
-                          lastUpdated={pollLastUpdated}
-                          lastUpdated={pollLastUpdated}
                         />
                       )}
                     </div>
