@@ -100,17 +100,24 @@ export default function Results() {
     pollingInterval,
     initializePoll,
     cleanup: cleanupPoll
-  } = usePollManager(code || '', currentActivation?.id || '', 'results');
+  } = usePollManager({
+    activationId: currentActivation?.id || null,
+    options: currentActivation?.options || [],
+    playerId: null,
+    debugMode
+  });
 
   // Initialize poll when activation changes
   useEffect(() => {
-    if (currentActivation?.type === 'poll' && currentActivation.id) {
-      initializePoll();
-    }
+    // Cleanup will happen automatically inside the hook
+    // when activationId changes
     return () => {
-      cleanupPoll();
+      // If needed, we can call resetPoll here
+      if (currentActivation?.type === 'poll') {
+        resetPoll();
+      }
     };
-  }, [currentActivation?.id, currentActivation?.type]);
+  }, [currentActivation?.id, currentActivation?.type, resetPoll]);
 
   // Get theme colors
   const theme = currentActivation?.theme || room?.theme || globalTheme;
@@ -416,12 +423,13 @@ export default function Results() {
                       ) : (
                         <PollDisplay
                           options={currentActivation.options || []}
-                          votesByText={pollVotesByText}
+                          votes={pollVotesByText}
                           totalVotes={totalVotes}
                           displayType={currentActivation.poll_display_type || 'bar'}
                           resultFormat={currentActivation.poll_result_format || 'percentage'}
                           isLoading={pollLoading}
                           pollState={pollState}
+                          lastUpdated={pollLastUpdated}
                           lastUpdated={pollLastUpdated}
                         />
                       )}
