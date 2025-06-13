@@ -42,7 +42,8 @@ const MediaDisplay: React.FC<MediaDisplayProps> = ({
     case 'gif':
       return (
         <img
-          src={getStorageUrl(url)}
+          src={url}
+          crossOrigin="anonymous"
           alt={alt}
           className={className}
           onError={handleImageError}

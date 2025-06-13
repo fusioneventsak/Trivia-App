@@ -10,19 +10,11 @@ export default defineConfig({
     port: 5173,
     strictPort: false,
     host: true,
-    headers: {
-      'Cross-Origin-Opener-Policy': 'same-origin',
-      'Cross-Origin-Embedder-Policy': 'require-corp'
-    }
   },
   preview: {
     port: 5173,
     strictPort: false,
     host: true,
-    headers: {
-      'Cross-Origin-Opener-Policy': 'same-origin',
-      'Cross-Origin-Embedder-Policy': 'require-corp'
-    }
   },
   build: {
     rollupOptions: {

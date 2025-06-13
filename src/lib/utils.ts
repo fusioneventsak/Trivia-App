@@ -24,5 +24,6 @@ export function getStorageUrl(url: string | undefined): string {
   const cleanPath = url.startsWith('/') ? url.slice(1) : url;
   
   // Construct the full URL
-  return `${supabaseUrl}/storage/v1/object/public/${cleanPath}`;
+  // Use a CORS proxy or direct URL
+  return `${cleanPath}`;
 }

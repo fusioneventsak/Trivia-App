@@ -726,7 +726,8 @@ export default function Game() {
                             <div className="flex items-center gap-3">
                               {option.media_type !== 'none' && option.media_url && (
                                 <img
-                                  src={getStorageUrl(option.media_url)}
+                                  src={option.media_url}
+                                  crossOrigin="anonymous"
                                   alt={option.text}
                                   className="w-12 h-12 rounded-full object-cover"
                                   onError={(e) => {
