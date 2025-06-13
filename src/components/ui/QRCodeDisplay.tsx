@@ -34,7 +34,6 @@ const QRCodeDisplay: React.FC<QRCodeDisplayProps> = ({
   // Track component mounting for client-side rendering
   useEffect(() => {
     setMounted(true);
-    console.log('QRCodeDisplay mounted');
   }, []);
 
   const copyToClipboard = () => {
