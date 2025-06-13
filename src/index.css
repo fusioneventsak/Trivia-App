@@ -1,0 +1,230 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --primary-color: #6366F1;
+  --secondary-color: #8B5CF6;
+  --background-color: #F3F4F6;
+  --text-color: #1F2937;
+  --container-bg-color: rgba(255, 255, 255, 0.1);
+  --input-bg-color: rgba(255, 255, 255, 0.2);
+  --input-text-color: #FFFFFF;
+  --button-text-color: #FFFFFF;
+  --success-color: #10B981;
+  --error-color: #EF4444;
+  --warning-color: #F59E0B;
+  --info-color: #3B82F6;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.5s ease-out forwards;
+}
+
+@keyframes fadeOut {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-10px); }
+}
+
+.animate-fadeOut {
+  animation: fadeOut 0.5s ease-out forwards;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+.animate-pulse-slow {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-shimmer {
+  background: linear-gradient(90deg, 
+    rgba(255,255,255,0) 0%, 
+    rgba(255,255,255,0.2) 50%, 
+    rgba(255,255,255,0) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+/* Border pulse animation for leaderboards */
+@keyframes pulseBorder {
+  0%, 100% { border-color: rgba(253, 224, 71, 0.7); }
+  50% { border-color: rgba(253, 224, 71, 1); box-shadow: 0 0 10px rgba(253, 224, 71, 0.5); }
+}
+
+.pulse-border {
+  animation: pulseBorder 2s ease-in-out infinite;
+}
+
+/* 16:9 aspect ratio container */
+.aspect-16-9 {
+  position: relative;
+  width: 100%;
+  padding-top: 56.25%; /* 9/16 = 0.5625 */
+}
+
+.aspect-16-9 > * {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* Default gradient background */
+.bg-default-gradient {
+  background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+}
+
+/* Theme-based utility classes */
+.bg-theme-primary {
+  background-color: var(--primary-color);
+}
+
+.bg-theme-secondary {
+  background-color: var(--secondary-color);
+}
+
+.text-theme-primary {
+  color: var(--primary-color);
+}
+
+.text-theme-secondary {
+  color: var(--secondary-color);
+}
+
+.border-theme-primary {
+  border-color: var(--primary-color);
+}
+
+.border-theme-secondary {
+  border-color: var(--secondary-color);
+}
+
+.bg-theme-gradient {
+  background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+}
+
+.bg-theme-container {
+  background-color: var(--container-bg-color);
+}
+
+.text-theme {
+  color: var(--text-color);
+}
+
+.bg-theme {
+  background-color: var(--background-color);
+}
+
+.bg-theme-success {
+  background-color: var(--success-color);
+}
+
+.bg-theme-error {
+  background-color: var(--error-color);
+}
+
+.bg-theme-warning {
+  background-color: var(--warning-color);
+}
+
+.bg-theme-info {
+  background-color: var(--info-color);
+}
+
+.text-theme-success {
+  color: var(--success-color);
+}
+
+.text-theme-error {
+  color: var(--error-color);
+}
+
+.text-theme-warning {
+  color: var(--warning-color);
+}
+
+.text-theme-info {
+  color: var(--info-color);
+}
+
+/* Point animation */
+@keyframes pointPulse {
+  0% { transform: scale(1); opacity: 0; }
+  50% { transform: scale(1.5); opacity: 1; }
+  100% { transform: scale(1); opacity: 0; }
+}
+
+.animate-point-pulse {
+  animation: pointPulse 1.5s ease-out;
+}
+
+/* Score change animation */
+@keyframes scoreChange {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
+.animate-score-change {
+  animation: scoreChange 0.5s ease-out;
+}
+
+/* Pop in animation */
+@keyframes popIn {
+  0% { transform: scale(0.8); opacity: 0; }
+  80% { transform: scale(1.1); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.animate-pop-in {
+  animation: popIn 0.4s ease-out forwards;
+}
+
+/* Confetti animation */
+@keyframes confettiRain {
+  0% { transform: translateY(-10px); opacity: 1; }
+  100% { transform: translateY(40px); opacity: 0; }
+}
+
+.confetti-piece {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background-color: var(--primary-color);
+  animation: confettiRain 1s ease-in forwards;
+}
+
+/* Modal animation */
+@keyframes modalFade {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-modal {
+  animation: modalFade 0.3s ease-out;
+}
+
+/* Slide up animation */
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.animate-slide-up {
+  animation: slideUp 0.3s ease-out;
+}

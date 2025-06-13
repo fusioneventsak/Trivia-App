@@ -1,0 +1,223 @@
+Trivia Gamification App - Project Prompt
+Project Overview
+The Trivia Gamification App is an interactive, real-time platform designed for hosting engaging trivia sessions, polls, and leaderboards in various settings such as events, classrooms, conferences, and team-building activities. The application allows hosts to create customizable rooms with branded themes, manage multiple question types, and engage participants through an intuitive interface.
+
+Key Features
+Multi-Room Management
+
+Create and manage multiple rooms with unique access codes
+Customize room branding with logos and theme colors
+Configure room-specific settings and messages
+Interactive Question Types
+
+Multiple-choice questions with correct answer tracking
+Text-answer questions for free-form responses
+Polls for gathering audience opinions
+Leaderboards for displaying participant rankings
+Real-Time Interaction
+
+Live updates across all connected devices
+Host controls for activating/deactivating questions
+Timer functionality with automatic answer reveals
+Instant feedback for participants
+User Experience
+
+Separate host and participant interfaces
+Mobile-friendly design for all device types
+Visual feedback with animations and confetti effects
+Customizable branding and theming
+Scoring and Analytics
+
+Automatic score tracking for correct answers
+Leaderboard displays for competitive engagement
+Analytics for tracking participation and performance
+Historical data for post-event analysis
+Tech Stack
+Frontend
+React: Core UI library
+TypeScript: Type-safe JavaScript
+React Router: Client-side routing
+Tailwind CSS: Utility-first styling
+Lucide React: Icon library
+Zustand: State management
+Canvas Confetti: Visual feedback effects
+Backend
+Supabase: Backend-as-a-Service platform
+PostgreSQL: Database
+Supabase Auth: User authentication
+Supabase Storage: File storage for logos and media
+Supabase Realtime: WebSocket-based real-time updates
+Build Tools
+Vite: Fast development server and bundler
+ESLint: Code linting
+TypeScript ESLint: TypeScript-specific linting
+Architecture
+Database Schema
+Users Table
+
+Stores user information and authentication details
+Includes roles for access control (admin, regular user)
+Rooms Table
+
+Stores room configuration, branding, and settings
+Contains unique room codes for easy access
+Links to customer/organization data
+Activations Table
+
+Stores question templates and active instances
+Supports multiple question types
+Contains media, options, and correct answers
+Players Table
+
+Tracks participant information
+Stores scores and room associations
+Game Sessions Table
+
+Manages the active state of rooms
+Tracks current activations and session status
+Analytics Events Table
+
+Records user interactions and answers
+Provides data for reporting and analysis
+Real-Time Communication
+The application uses Supabase's real-time capabilities to enable instant updates:
+
+Subscription-Based Updates
+
+Room state changes (current question, timer)
+Player joins and score updates
+Poll votes and results
+Optimistic UI Updates
+
+Local state updates before server confirmation
+Fallback mechanisms for connection issues
+Notification System
+
+PostgreSQL triggers for database changes
+WebSocket channels for specific room events
+User Flows
+Host Flow
+Room Creation
+
+Create a new room with custom branding
+Configure room settings and access controls
+Generate a unique room code
+Question Management
+
+Create question templates of various types
+Organize questions by category and difficulty
+Preview questions before activation
+Live Session Management
+
+Activate questions for participants to answer
+Control poll states (pending, voting, closed)
+Monitor real-time responses and scores
+Display leaderboards at strategic moments
+Participant Flow
+Room Access
+
+Enter room code to join a session
+Provide name for identification
+No account required for basic participation
+Question Interaction
+
+Receive active questions in real-time
+Submit answers within time limits
+Get immediate feedback on correctness
+See score updates and position on leaderboard
+Results Viewing
+
+View correct answers after time expires
+See poll results as they come in
+Track personal score and ranking
+Implementation Details
+Authentication System
+JWT-based authentication through Supabase
+Role-based access control (admin, regular users)
+Guest access for participants (no login required)
+Real-Time Updates
+PostgreSQL triggers notify on database changes
+Supabase Realtime channels for specific room events
+Client-side subscription management with reconnection logic
+Responsive Design
+Mobile-first approach for all interfaces
+Adaptive layouts for different screen sizes
+Touch-friendly controls for mobile participants
+Theme System
+Dynamic theming based on room configuration
+CSS variables and Tailwind utility classes
+Real-time theme preview during configuration
+Deployment Considerations
+Database Performance
+
+Indexes on frequently queried columns
+Optimized queries for real-time operations
+Connection pooling for high concurrency
+Scaling
+
+Stateless architecture for horizontal scaling
+Efficient real-time message handling
+Caching strategies for static content
+Security
+
+Row-Level Security policies in Supabase
+Input validation and sanitization
+Rate limiting for public endpoints
+Development Workflow
+Local Development
+
+Vite dev server with hot module replacement
+Supabase local development setup
+ESLint for code quality enforcement
+Testing
+
+Component testing with React Testing Library
+End-to-end testing with Cypress
+Manual testing for real-time features
+Deployment
+
+CI/CD pipeline with GitHub Actions
+Netlify for frontend hosting
+Supabase for backend services
+Future Enhancements
+Advanced Question Types
+
+Image-based questions
+Matching questions
+Drag-and-drop interactions
+Integration Capabilities
+
+LMS integration (Canvas, Moodle)
+Single Sign-On options
+API for external system integration
+Enhanced Analytics
+
+Detailed performance reports
+Participant engagement metrics
+Question effectiveness analysis
+Monetization Options
+
+Subscription tiers for different feature sets
+Pay-per-event pricing model
+White-label solutions for enterprises
+Getting Started for Developers
+Prerequisites
+
+Node.js 16+ and npm/yarn
+Supabase account
+Git for version control
+Setup Steps
+
+Clone the repository
+Install dependencies with npm install
+Set up environment variables for Supabase connection
+Run migrations with npm run migrate
+Start development server with npm run dev
+Key Files and Directories
+
+/src/components: React components organized by feature
+/src/lib: Utility functions and API clients
+/src/store: Zustand state management
+/supabase/migrations: Database schema and migrations
+Conclusion
+The Trivia Gamification App provides a comprehensive solution for interactive engagement through questions, polls, and leaderboards. Its real-time capabilities, customizable branding, and flexible question types make it suitable for a wide range of use cases from educational settings to corporate events. The modern tech stack ensures good performance, scalability, and developer experience.
