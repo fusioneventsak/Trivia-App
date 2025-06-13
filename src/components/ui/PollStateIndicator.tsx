@@ -27,19 +27,19 @@ const PollStateIndicator: React.FC<PollStateIndicatorProps> = ({
       bgColor = 'bg-yellow-500/20';
       textColor = 'text-yellow-100';
       icon = <Clock className={size === 'sm' ? 'w-3 h-3 mr-1' : size === 'lg' ? 'w-6 h-6 mr-2' : 'w-5 h-5 mr-2'} />;
-      label = 'Waiting for voting to start';
+      label = 'Ready for voting';
       break;
     case 'voting':
       bgColor = 'bg-green-500/20';
       textColor = 'text-green-100';
       icon = <PlayCircle className={size === 'sm' ? 'w-3 h-3 mr-1' : size === 'lg' ? 'w-6 h-6 mr-2' : 'w-5 h-5 mr-2'} />;
-      label = 'Voting is open';
+      label = 'Voting open';
       break;
     case 'closed':
       bgColor = 'bg-red-500/20';
       textColor = 'text-red-100';
       icon = <Lock className={size === 'sm' ? 'w-3 h-3 mr-1' : size === 'lg' ? 'w-6 h-6 mr-2' : 'w-5 h-5 mr-2'} />;
-      label = 'Voting is locked';
+      label = 'Voting closed';
       break;
   }
   

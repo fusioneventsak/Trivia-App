@@ -709,12 +709,8 @@ export default function Game() {
                 {/* Poll */}
                 {currentActivation.type === 'poll' && (
                   <div>
-                    {pollState === 'pending' ? (
-                      <div className="text-center text-white py-8">
-                        <Clock className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                        <p className="text-xl">Waiting for voting to start...</p>
-                      </div>
-                    ) : pollState === 'voting' && !pollVoted ? (
+                    {/* Always show options, but enable interaction only when voting is open */}
+                    {pollState === 'voting' && !pollVoted ? (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         {currentActivation.options?.map((option, index) => (
                           <button
@@ -740,11 +736,43 @@ export default function Game() {
                           </button>
                         ))}
                       </div>
+                    ) : pollState === 'pending' ? (
+                      <div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                          {currentActivation.options?.map((option, index) => (
+                            <div
+                              key={index}
+                              className="p-4 rounded-lg bg-white/20 opacity-70 transition-all duration-300"
+                            >
+                              <div className="flex items-center gap-3">
+                                {option.media_type !== 'none' && option.media_url && (
+                                  <img
+                                    src={option.media_url}
+                                    crossOrigin="anonymous"
+                                    alt={option.text}
+                                    className="w-12 h-12 rounded-full object-cover"
+                                    onError={(e) => {
+                                      e.currentTarget.src = 'https://via.placeholder.com/100?text=!';
+                                    }}
+                                  />
+                                )}
+                                <span className="text-white font-medium text-lg">{option.text}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="text-center text-white py-4 bg-white/10 rounded-lg">
+                          <Clock className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                          <p className="text-lg">Waiting for host to start voting...</p>
+                        </div>
+                      </div>
                     ) : (
                       <PollDisplay
                         options={currentActivation.options || []}
                         votes={pollVotes}
                         totalVotes={totalVotes}
+                        pollState={pollState}
+                        lastUpdated={pollLastUpdated}
                         pollState={pollState}
                         lastUpdated={pollLastUpdated}
                         displayType={currentActivation.poll_display_type || 'bar'}

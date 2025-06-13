@@ -32,6 +32,7 @@ interface PollDisplayProps {
   className?: string;
   pollState?: 'pending' | 'voting' | 'closed';
   lastUpdated?: number;
+  showOptionsOnly?: boolean;
 }
 
 const PollDisplay: React.FC<PollDisplayProps> = ({
@@ -249,8 +250,10 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
 
     return (
       <div className={cn("p-4 bg-white/10 rounded-lg", className)}>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-white">Poll Results</h3>
+        <div className="flex items-center justify-between mb-3 border-b border-white/10 pb-2">
+          <h3 className="font-semibold text-white">
+            {pollState === 'closed' ? 'Final Results' : 'Live Results'}
+          </h3>
           <div className="text-sm text-white/80 flex items-center">
             {animatedTotalVotes} votes
             {pollState === 'voting' && (
@@ -370,8 +373,10 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
   if (displayType === 'vertical') {
     return (
       <div className={cn("p-4 bg-white/10 rounded-lg", className)}>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-white">Poll Results</h3>
+        <div className="flex items-center justify-between mb-3 border-b border-white/10 pb-2">
+          <h3 className="font-semibold text-white">
+            {pollState === 'closed' ? 'Final Results' : 'Live Results'}
+          </h3>
           <div className="text-sm text-white/80 flex items-center">
             {animatedTotalVotes} votes
             {pollState === 'voting' && (
@@ -459,8 +464,10 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
   // Default: Horizontal bars
   return (
     <div className={cn("p-4 bg-white/10 rounded-lg", className)}>
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="font-semibold text-white">Poll Results</h3>
+      <div className="flex items-center justify-between mb-3 border-b border-white/10 pb-2">
+        <h3 className="font-semibold text-white">
+          {pollState === 'closed' ? 'Final Results' : 'Live Results'}
+        </h3>
         <div className="text-sm text-white/80 flex items-center">
           {animatedTotalVotes} votes
           {pollState === 'voting' && (
