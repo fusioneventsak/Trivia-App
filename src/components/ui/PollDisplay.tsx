@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { cn, getStorageUrl } from '../../lib/utils';
 import MediaDisplay from './MediaDisplay';
-import { CheckCircle, Crown, Activity, Lock } from 'lucide-react';
+import { CheckCircle, Crown, Activity, Lock, Clock } from 'lucide-react';
 import { animateValue, stagger } from '../../lib/animation-utils';
 
 interface PollOption {
@@ -311,10 +311,21 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
     return barWidths[optionId] || 0;
   };
 
-  // Show options only (no results)
-  if (showOptionsOnly) {
+  // Show options only (no results) - for pending state or when explicitly requested
+  if (showOptionsOnly || pollState === 'pending') {
     return (
       <div className={cn("p-4 bg-white/10 rounded-lg", className)}>
+        <div className="flex items-center justify-between mb-3 border-b border-white/10 pb-2">
+          <h3 className="font-semibold text-white">
+            {pollState === 'pending' ? 'Poll Options' : 'Poll Results'}
+          </h3>
+          {pollState === 'pending' && (
+            <div className="text-sm text-yellow-400 flex items-center">
+              <Clock className="w-4 h-4 mr-1" />
+              <span>Waiting to start</span>
+            </div>
+          )}
+        </div>
         <div className="space-y-3">
           {options.map((option, index) => (
             <div key={index} className="p-3 bg-white/5 rounded-lg">
@@ -337,6 +348,14 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
             </div>
           ))}
         </div>
+        {pollState === 'pending' && (
+          <div className="mt-4 text-center">
+            <div className="inline-flex items-center px-3 py-1 bg-yellow-500/20 rounded-full">
+              <Clock className="w-4 h-4 mr-2 text-yellow-400" />
+              <span className="text-sm text-yellow-300">Voting has not started yet</span>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
