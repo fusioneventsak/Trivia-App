@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { cn, getStorageUrl } from '../../lib/utils';
 import MediaDisplay from './MediaDisplay';
-import { CheckCircle, Crown, Activity } from 'lucide-react';
+import { CheckCircle, Crown, Activity, Lock } from 'lucide-react';
 import { animateValue, stagger } from '../../lib/animation-utils';
 
 interface PollOption {
@@ -122,23 +122,34 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
   // Initialize real values when poll closes
   useEffect(() => {
     if (pollState === 'closed') {
-      setAnimatedVotes(votes);
-      setAnimatedTotalVotes(totalVotes);
-      prevVotesRef.current = votes;
-      prevTotalVotesRef.current = totalVotes;
-      
-      // Calculate real bar widths
-      const realWidths: {[key: string]: number} = {};
-      options.forEach(option => {
-        const optionId = option.id || option.text;
-        const voteCount = votes[optionId] || 0;
-        const percentage = totalVotes > 0 ? (voteCount / totalVotes * 100) : 0;
-        realWidths[optionId] = Math.max(percentage, 4); // Minimum 4% for visibility
-      });
-      setBarWidths(realWidths);
-      
-      // Determine leading option
-      updateLeadingOption(votes);
+      // Add a small delay for dramatic effect
+      setTimeout(() => {
+        setAnimatedVotes(votes);
+        setAnimatedTotalVotes(totalVotes);
+        prevVotesRef.current = votes;
+        prevTotalVotesRef.current = totalVotes;
+        
+        // Calculate real bar widths with animation
+        const realWidths: {[key: string]: number} = {};
+        options.forEach(option => {
+          const optionId = option.id || option.text;
+          const voteCount = votes[optionId] || 0;
+          const percentage = totalVotes > 0 ? (voteCount / totalVotes * 100) : 0;
+          realWidths[optionId] = Math.max(percentage, 4); // Minimum 4% for visibility
+        });
+        
+        // Animate from random widths to real widths
+        setIsAnimating(true);
+        setBarWidths(realWidths);
+        
+        // Determine leading option
+        updateLeadingOption(votes);
+        
+        // Reset animation flag after transition
+        setTimeout(() => {
+          setIsAnimating(false);
+        }, 1500);
+      }, 300); // 300ms delay for effect
     }
   }, [pollState, votes, totalVotes, options]);
   
@@ -428,9 +439,24 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
         </div>
       )}
       
-      {pollState === 'closed' && animatedTotalVotes === 0 && (
-        <div className="text-center text-white/60 mt-4">
-          No votes were cast
+      {pollState === 'closed' && (
+        <div className="mt-4">
+          {/* Voting Closed Notification */}
+          <div className="bg-red-500/20 border border-red-500/30 rounded-lg p-4 mb-3">
+            <div className="flex items-center justify-center">
+              <Lock className="w-5 h-5 text-red-400 mr-2" />
+              <span className="text-lg font-semibold text-red-300">Voting Closed</span>
+            </div>
+            <p className="text-center text-white/70 text-sm mt-1">
+              Final results are now displayed
+            </p>
+          </div>
+          
+          {animatedTotalVotes === 0 && (
+            <div className="text-center text-white/60">
+              No votes were cast
+            </div>
+          )}
         </div>
       )}
     </div>
