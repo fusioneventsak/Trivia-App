@@ -140,6 +140,8 @@ export default function HostControls({ roomId, className = '' }: HostControlsPro
     try {
       setLoading(true);
       
+      console.log('Updating poll state to:', newState, 'for activation:', currentActivation.id);
+      
       const { error } = await supabase
         .from('activations')
         .update({ poll_state: newState })
@@ -149,7 +151,25 @@ export default function HostControls({ roomId, className = '' }: HostControlsPro
       
       setPollState(newState);
       setCurrentActivation({ ...currentActivation, poll_state: newState });
-    } catch (error) {
+      
+      // Also broadcast the state change through the poll channel
+      const channel = supabase.channel(`poll-${currentActivation.id}`);
+      await channel.subscribe();
+      
+      channel.send({
+        type: 'broadcast',
+        event: 'poll-state-change',
+        payload: { state: newState }
+      });
+      
+      // Show success message
+      if (newState === 'voting') {
+        console.log('Poll voting started successfully');
+      } else if (newState === 'closed') {
+        console.log('Poll voting closed successfully');
+      }
+      
+    } catch (error: any) {
       console.error('Error updating poll state:', error);
     } finally {
       setLoading(false);

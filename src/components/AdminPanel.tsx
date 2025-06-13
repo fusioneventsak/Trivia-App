@@ -21,6 +21,46 @@ export default function AdminPanel() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [room, setRoom] = useState<any>(null);
   
+  const startPollVoting = async () => {
+    if (!currentActivation) return;
+    
+    try {
+      setIsControllingPoll(true);
+      setError(null);
+      
+      console.log('Starting poll voting for activation:', currentActivation);
+      
+      // Update the poll state to voting
+      const { error } = await supabase
+        .from('activations')
+        .update({ poll_state: 'voting' })
+        .eq('id', currentActivation);
+        
+      if (error) throw error;
+      
+      setPollState('voting');
+      
+      // Also broadcast the state change through the poll channel
+      const channel = supabase.channel(`poll-${currentActivation}`);
+      await channel.subscribe();
+      
+      channel.send({
+        type: 'broadcast',
+        event: 'poll-state-change',
+        payload: { state: 'voting' }
+      });
+      
+      // Show success message
+      setSuccessMessage('Voting started!');
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (error: any) {
+      console.error('Error starting poll voting:', error);
+      setError('Failed to start voting');
+    } finally {
+      setIsControllingPoll(false);
+    }
+  };
+  
   // Check if we have a valid session
   useEffect(() => {
     const checkUser = async () => {

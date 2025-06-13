@@ -64,6 +64,7 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
   const prevVotesRef = useRef<PollVotes>({});
   const prevTotalVotesRef = useRef<number>(0);
   const animationsRef = useRef<{[key: string]: number}>({});
+  const prevPollStateRef = useRef<'pending' | 'voting' | 'closed'>('pending');
   
   // Initialize animated values
   useEffect(() => {
@@ -71,6 +72,7 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
     setAnimatedTotalVotes(totalVotes);
     prevVotesRef.current = votes;
     prevTotalVotesRef.current = totalVotes;
+    prevPollStateRef.current = pollState;
     
     // Calculate initial bar widths
     const initialWidths: {[key: string]: number} = {};
@@ -108,6 +110,11 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
   useEffect(() => {
     // Check if votes have changed
     let hasChanged = totalVotes !== prevTotalVotesRef.current;
+    
+    // Force animation when poll state changes to voting
+    if (pollState === 'voting' && prevPollStateRef.current !== 'voting') {
+      hasChanged = true;
+    }
     
     if (!hasChanged) {
       // Check each option for changes
@@ -173,6 +180,9 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
       
       // Update leading option
       updateLeadingOption(votes);
+      
+      // Update poll state ref
+      prevPollStateRef.current = pollState;
       
       // Update refs for next comparison
       prevVotesRef.current = { ...votes };
