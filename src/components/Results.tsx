@@ -83,6 +83,8 @@ export default function Results() {
   const [previousRankings, setPreviousRankings] = useState<{[key: string]: number}>({});
   const [previousActivationType, setPreviousActivationType] = useState<string | null>(null);
   const [debugMode, setDebugMode] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<'fast' | 'slow' | 'checking'>('fast');
+  const lastUpdateTimeRef = useRef<number>(Date.now());
   const [activationRefreshCount, setActivationRefreshCount] = useState(0);
   const activationChannelRef = useRef<any>(null);
   const debugIdRef = useRef<string>(`results-${Math.random().toString(36).substring(2, 7)}`);
@@ -95,11 +97,14 @@ export default function Results() {
     votesByText: pollVotesByText,
     totalVotes,
     pollState,
+    lastUpdated: pollLastUpdated,
+    pollingInterval,
     isLoading: pollLoading
   } = usePollManager({
     activationId: currentActivation?.id || null,
     options: currentActivation?.options,
-    playerId: null // Results page doesn't have a player
+    playerId: null, // Results page doesn't have a player
+    debugMode
   });
 
   // Log poll data for debugging
@@ -107,7 +112,8 @@ export default function Results() {
     console.log(`[${debugIdRef.current}] Poll data updated:`, {
       pollVotesByText,
       totalVotes,
-      pollState
+      pollState,
+      pollingInterval
     });
   }, [pollVotesByText, totalVotes, pollState]);
 
@@ -131,6 +137,34 @@ export default function Results() {
       window.removeEventListener('keydown', keyHandler);
     };
   }, [debugMode]);
+
+  // Track connection status based on polling interval
+  useEffect(() => {
+    if (pollingInterval <= 2000) {
+      setConnectionStatus('fast');
+    } else if (pollingInterval <= 5000) {
+      setConnectionStatus('slow');
+    } else {
+      setConnectionStatus('checking');
+    }
+    
+    // Check for long periods without updates
+    const checkUpdateInterval = setInterval(() => {
+      const timeSinceLastUpdate = Date.now() - lastUpdateTimeRef.current;
+      if (timeSinceLastUpdate > 30000) { // 30 seconds
+        setConnectionStatus('checking');
+      }
+    }, 10000);
+    
+    return () => clearInterval(checkUpdateInterval);
+  }, [pollingInterval]);
+
+  // Update last update time when poll data changes
+  useEffect(() => {
+    if (pollLastUpdated) {
+      lastUpdateTimeRef.current = pollLastUpdated;
+    }
+  }, [pollLastUpdated]);
 
   // Add network status event listeners
   useEffect(() => {
@@ -661,7 +695,6 @@ export default function Results() {
       }}
     >
       {/* Network status indicator */}
-      {/* Network status indicator */}
       {showNetworkStatus && (
         <div className="fixed top-0 left-0 right-0 z-50 p-2">
           <NetworkStatus 
@@ -790,100 +823,4 @@ export default function Results() {
                     <div className="space-y-4">
                       <PollStateIndicator state={pollState} />
                       
-                      {pollState === 'pending' ? (
-                        <div className="text-center text-white py-8">
-                          <Clock className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                          <p className="text-xl">Voting will start soon...</p>
-                        </div>
-                      ) : (
-                        <PollDisplay
-                          options={currentActivation.options || []}
-                          votes={pollVotesByText}
-                          totalVotes={totalVotes}
-                          displayType={currentActivation.poll_display_type || 'bar'}
-                          resultFormat={currentActivation.poll_result_format || 'both'}
-                          getStorageUrl={getStorageUrl}
-                          themeColors={activeTheme}
-                        />
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          ) : (
-            /* Waiting for next question */
-            <div className="bg-white/10 backdrop-blur-sm rounded-lg shadow-sm p-6 mb-6 text-center">
-              <h2 className="text-xl font-semibold text-white mb-4">Waiting for next question...</h2>
-              <QRCodeDisplay value={getJoinUrl()} theme={activeTheme} />
-            </div>
-          )}
-        </ErrorBoundary>
-        
-        {/* Player Stats */}
-        /* Player stats display */
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 flex items-center">
-            <Users className="w-6 h-6 text-white mr-3" />
-            <div>
-              <div className="text-sm text-white/80">Players</div>
-              <div className="text-xl font-bold text-white">{players.length}</div>
-            </div>
-          </div>
-          
-          {currentActivation?.type === 'poll' && (
-            <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 flex items-center">
-              <PlayCircle className="w-6 h-6 text-white mr-3" />
-              <div>
-                <div className="text-sm text-white/80">Total Votes</div>
-                <div className="text-xl font-bold text-white">{totalVotes}</div>
-              </div>
-            </div>
-          )}
-          
-          {timeRemaining !== null && (
-            <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 flex items-center">
-              <Clock className="w-6 h-6 text-white mr-3" />
-              <div>
-                <div className="text-sm text-white/80">Time Left</div>
-                <div className="text-xl font-bold text-white">{timeRemaining}s</div>
-              </div>
-            </div>
-          )}
-          
-          {currentActivation?.type === 'multiple_choice' && showAnswers && (
-            <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 flex items-center">
-              <Lock className="w-6 h-6 text-white mr-3" />
-              <div>
-                <div className="text-sm text-white/80">Answer</div>
-                <div className="text-xl font-bold text-white">Revealed</div>
-              </div>
-            </div>
-          )}
-        </div>
-        
-        {/* Debug Info */}
-        /* Debug information panel */
-        {debugMode && (
-          <div className="bg-black/20 backdrop-blur-sm rounded-lg p-4 mb-6 text-white text-sm font-mono">
-            <div>Room ID: {room.id}</div>
-            <div>Activation ID: {currentActivation?.id}</div>
-            <div>Activation Type: {currentActivation?.type}</div>
-            <div>Poll State: {pollState}</div>
-            <div>Show Answers: {showAnswers.toString()}</div>
-            <div>Total Votes: {totalVotes}</div>
-            <div>Network Status: {networkError ? 'Offline' : 'Online'}</div>
-            <div>Votes by Text: {JSON.stringify(pollVotesByText)}</div>
-            <button
-              onClick={() => setActivationRefreshCount(prev => prev + 1)}
-              className="mt-2 px-3 py-1 bg-white/10 rounded hover:bg-white/20"
-            >
-              <RefreshCw className="w-4 h-4 inline mr-2" />
-              Refresh Activation
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
+                      {pollState === 'pending

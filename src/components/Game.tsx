@@ -73,12 +73,15 @@ export default function Game() {
     hasVoted: pollVoted,
     selectedOptionId: pollSelectedOptionId,
     pollState,
+    lastUpdated: pollLastUpdated,
+    pollingInterval,
     submitVote: submitPollVote,
     isLoading: pollLoading
   } = usePollManager({
     activationId: currentActivation?.id || null,
     options: currentActivation?.options,
-    playerId: currentPlayerId
+    playerId: currentPlayerId,
+    debugMode
   });
 
   // Log poll data for debugging
@@ -741,6 +744,8 @@ export default function Game() {
                         options={currentActivation.options || []}
                         votes={pollVotes}
                         totalVotes={totalVotes}
+                        pollState={pollState}
+                        lastUpdated={pollLastUpdated}
                         displayType={currentActivation.poll_display_type || 'bar'}
                         selectedAnswer={selectedAnswer}
                         getStorageUrl={getStorageUrl}

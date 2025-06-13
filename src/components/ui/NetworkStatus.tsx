@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { WifiOff, Wifi, RefreshCw } from 'lucide-react';
+import { WifiOff, Wifi, RefreshCw, Activity } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 interface NetworkStatusProps {
   onRetry?: () => void;
   className?: string;
   showOnlyWhenOffline?: boolean;
+  pollingInterval?: number;
 }
 
 /**
@@ -14,7 +15,8 @@ interface NetworkStatusProps {
 const NetworkStatus: React.FC<NetworkStatusProps> = ({ 
   onRetry, 
   className,
-  showOnlyWhenOffline = true
+  showOnlyWhenOffline = true,
+  pollingInterval
 }) => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [isRetrying, setIsRetrying] = useState(false);
@@ -60,19 +62,31 @@ const NetworkStatus: React.FC<NetworkStatusProps> = ({
     <div 
       className={cn(
         "flex items-center justify-between p-3 rounded-lg text-sm",
-        isOnline ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700",
+        isOnline ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700", 
         className
       )}
     >
       <div className="flex items-center">
         {isOnline ? (
-          <Wifi className="w-4 h-4 mr-2" />
+          <Wifi className="w-4 h-4 mr-2" /> 
         ) : (
           <WifiOff className="w-4 h-4 mr-2" />
         )}
-        <span>
-          {isOnline ? 'Connected' : 'No internet connection'}
-        </span>
+        <div>
+          <span>
+            {isOnline ? 'Connected' : 'No internet connection'}
+          </span>
+          {isOnline && pollingInterval && (
+            <div className="text-xs flex items-center mt-0.5">
+              <Activity className="w-3 h-3 mr-1" />
+              <span>
+                {pollingInterval <= 2000 ? 'Fast updates' : 
+                 pollingInterval <= 5000 ? 'Normal updates' : 
+                 'Slow updates'} ({(pollingInterval / 1000).toFixed(1)}s)
+              </span>
+            </div>
+          )}
+        </div>
       </div>
       
       <button
