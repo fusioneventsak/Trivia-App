@@ -665,13 +665,15 @@ export default function Game() {
                         >
                           <div className="flex items-center gap-3">
                             {option.media_type !== 'none' && option.media_url && (
-                              <MediaDisplay
-                                url={option.media_url}
-                                type={option.media_type}
-                                alt={option.text}
-                                className="w-12 h-12 rounded-full object-cover"
-                                fallbackText="!"
-                              />
+                              <div>
+                                <MediaDisplay
+                                  url={option.media_url}
+                                  type={option.media_type}
+                                  alt={option.text}
+                                  className="w-full h-full object-cover"
+                                  fallbackText="!"
+                                />
+                              </div>
                             )}
                             <span className="text-white font-medium text-lg">{option.text}</span>
                           </div>
@@ -804,6 +806,3 @@ export default function Game() {
           </div>
         )}
       </div>
-    </div>
-  );
-}
