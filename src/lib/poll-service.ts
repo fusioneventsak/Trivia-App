@@ -1,43 +1,22 @@
 import { supabase } from './supabase';
 import { retry, isNetworkError, logError } from './error-handling';
 
-interface PollVoteRequest {
-  activationId: string;
-  playerId: string;
-  optionId: string;
-  optionText: string;
-}
-
-interface PollVoteResponse {
-  success: boolean;
-  error?: string;
-}
-
-interface PollVotes {
-  [optionId: string]: number;
-}
-
-interface PollVotesByText {
-  [optionText: string]: number;
-}
-
-interface PollResults {
-  votes: PollVotes;
-  votesByText: PollVotesByText;
-  totalVotes: number;
-}
-
 /**
  * Submit a vote for a poll
  */
-export async function submitPollVote(request: PollVoteRequest): Promise<PollVoteResponse> {
+export async function submitPollVote(
+  activationId: string,
+  playerId: string,
+  optionId: string,
+  optionText: string
+): Promise<{ success: boolean; error?: string }> {
   try {
     // Check if player has already voted
     const { data: existingVote, error: checkError } = await supabase
       .from('poll_votes')
       .select('id')
-      .eq('activation_id', request.activationId)
-      .eq('player_id', request.playerId)
+      .eq('activation_id', activationId)
+      .eq('player_id', playerId)
       .maybeSingle();
 
     if (checkError) {
@@ -52,10 +31,10 @@ export async function submitPollVote(request: PollVoteRequest): Promise<PollVote
     const { error: insertError } = await supabase
       .from('poll_votes')
       .insert({
-        activation_id: request.activationId,
-        player_id: request.playerId,
-        option_id: request.optionId,
-        option_text: request.optionText
+        activation_id: activationId,
+        player_id: playerId,
+        option_id: optionId,
+        option_text: optionText
       });
 
     if (insertError) {
@@ -69,100 +48,31 @@ export async function submitPollVote(request: PollVoteRequest): Promise<PollVote
     // Log analytics event
     await supabase.from('analytics_events').insert({
       event_type: 'poll_vote',
-      activation_id: request.activationId,
-      player_id: request.playerId,
+      activation_id: activationId,
+      player_id: playerId,
       event_data: {
-        option_id: request.optionId,
-        option_text: request.optionText
+        option_id: optionId,
+        option_text: optionText
       }
     });
 
     return { success: true };
   } catch (error) {
     console.error('Error submitting poll vote:', error);
-    logError(error, 'poll-service.submitPollVote', request.playerId);
+    logError(error, 'poll-service.submitPollVote', playerId);
     
-    // If it's a network error, store the vote for later retry
-    if (isNetworkError(error)) {
-      try {
-        // Store in local storage for later retry
-        const pendingVotes = JSON.parse(localStorage.getItem('pendingPollVotes') || '[]');
-        pendingVotes.push({
-          activation_id: request.activationId,
-          player_id: request.playerId,
-          option_id: request.optionId,
-          option_text: request.optionText,
-          created_at: new Date().toISOString()
-        });
-        localStorage.setItem('pendingPollVotes', JSON.stringify(pendingVotes));
-        
-        return { 
-          success: true, 
-          error: 'Your vote was saved locally and will be submitted when connection is restored.' 
-        };
-      } catch (storageError) {
-        console.error('Error saving vote to local storage:', storageError);
-      }
-      
-      return { 
-        success: false, 
-        error: 'Network error. Please check your connection and try again.' 
-      };
-    }
-    
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Failed to submit vote' 
-    };
-  }
-}
-
-/**
- * Get poll results for an activation
- */
-export async function getPollResults(activationId: string): Promise<PollResults> {
-  try {
-    // Use retry for better error handling
-    const { data, error } = await retry(async () => {
-      return await supabase
-        .from('poll_votes')
-        .select('option_id, option_text')
-        .eq('activation_id', activationId);
-    }, 2);
-
-    if (error) throw error;
-
-    // Process votes
-    const votes: PollVotes = {};
-    const votesByText: PollVotesByText = {};
-    let totalVotes = 0;
-
-    data?.forEach(vote => {
-      // Count by option ID
-      if (vote.option_id) {
-        votes[vote.option_id] = (votes[vote.option_id] || 0) + 1;
-      }
-      
-      // Count by option text
-      if (vote.option_text) {
-        votesByText[vote.option_text] = (votesByText[vote.option_text] || 0) + 1;
-      }
-      
-      totalVotes++;
-    });
-
-    return { votes, votesByText, totalVotes };
-  } catch (error) {
-    console.error('Error fetching poll results:', error);
-    logError(error, 'poll-service.getPollResults');
-    return { votes: {}, votesByText: {}, totalVotes: 0 };
+    const errorMessage = error instanceof Error ? error.message : 'Failed to submit vote';
+    return { success: false, error: errorMessage };
   }
 }
 
 /**
  * Check if a player has already voted in a poll
  */
-export async function hasPlayerVoted(activationId: string, playerId: string): Promise<boolean> {
+export async function hasPlayerVoted(
+  activationId: string,
+  playerId: string
+): Promise<boolean> {
   try {
     const { data, error } = await supabase
       .from('poll_votes')
@@ -183,7 +93,9 @@ export async function hasPlayerVoted(activationId: string, playerId: string): Pr
 /**
  * Get the current poll state
  */
-export async function getPollState(activationId: string): Promise<'pending' | 'voting' | 'closed'> {
+export async function getPollState(
+  activationId: string
+): Promise<'pending' | 'voting' | 'closed'> {
   try {
     const { data, error } = await supabase
       .from('activations')
