@@ -121,12 +121,6 @@ const CountdownTimer: React.FC<CountdownTimerProps> = ({
     return 'bg-green-500/30';
   };
   
-  // Special mobile styles for better visibility
-  const mobileStyles = isMobile ? {
-    container: "fixed top-4 left-4 right-4 z-50 flex justify-center",
-    timer: "bg-red-600 text-white px-6 py-4 rounded-xl shadow-2xl border-4 border-yellow-400 animate-pulse"
-  } : null;
-  
   return (
     <div className={cn("flex flex-col items-center", isMobile && variant !== 'small' && "w-full")}>
       <div 

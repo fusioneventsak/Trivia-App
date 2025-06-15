@@ -70,6 +70,10 @@ export default function Game() {
   // CRITICAL: Track timer state explicitly
   const [hasActiveTimer, setHasActiveTimer] = useState(false);
   const [timerExpired, setTimerExpired] = useState(false);
+  const [pendingPoints, setPendingPoints] = useState<number>(0);
+  const [pendingCorrect, setPendingCorrect] = useState<boolean>(false);
+  const [pendingResponseTime, setPendingResponseTime] = useState<number>(0);
+  const [hasPendingReward, setHasPendingReward] = useState(false);
 
   // Timer reference for cleanup
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -93,13 +97,13 @@ export default function Game() {
   const canRevealResults = () => {
     // If there's no timer, can show immediately
     if (!hasActiveTimer) {
-      console.log(`[${debugId}] 🟢 No timer - can reveal results`);
+      console.log(`[${debugId}] 🟢 No timer - can reveal results immediately`);
       return true;
     }
     
     // If timer has explicitly expired, can show
     if (timerExpired) {
-      console.log(`[${debugId}] 🟢 Timer expired - can reveal results`);
+      console.log(`[${debugId}] 🟢 Timer expired - can reveal results now`);
       return true;
     }
     
@@ -139,6 +143,8 @@ export default function Game() {
       timerExpired,
       canReveal: canRevealResults(),
       pointsEarned,
+     pendingPoints,
+     hasPendingReward,
       showPointAnimation
     });
   }, [hasAnswered, showAnswers, showResult, timeRemaining, hasActiveTimer, timerExpired, pointsEarned, showPointAnimation, isMobile, debugId]);
@@ -359,6 +365,10 @@ export default function Game() {
     setShowAnswers(false);
     setShowResult(false);
     setShowPointAnimation(false);
+   setPendingPoints(0);
+   setPendingCorrect(false);
+   setPendingResponseTime(0);
+   setHasPendingReward(false);
     
     // If no time limit, no timer needed
     if (!activation.time_limit) {
@@ -468,12 +478,24 @@ export default function Game() {
       const basePoints = 100;
       const timeBonus = getTimeBonus(responseTime);
       calculatedPoints = calculatePoints(basePoints, timeBonus);
-      setPointsEarned(calculatedPoints);
+      
+      // Store points for later award
+      setPendingPoints(calculatedPoints);
+      setPendingCorrect(true);
+      setPendingResponseTime(responseTime);
+      setHasPendingReward(true);
+      
       console.log(`[${debugId}] 💰 Points calculated: ${calculatedPoints} (HIDDEN until timer expires)`);
     }
     
-    // Update database immediately for leaderboard
-    await updatePlayerScoreInDB(calculatedPoints, isAnswerCorrect, responseTime);
+    // Only update database if we can reveal results immediately
+    if (canRevealResults()) {
+      console.log(`[${debugId}] ✅ Updating database immediately`);
+      await updatePlayerScoreInDB(calculatedPoints, isAnswerCorrect, responseTime);
+      setPointsEarned(calculatedPoints);
+    } else {
+      console.log(`[${debugId}] ⏳ Database update delayed until timer expires`);
+    }
     
     // CRITICAL: Only show results if timer allows it
     if (canRevealResults()) {
@@ -514,12 +536,24 @@ export default function Game() {
       const basePoints = 150;
       const timeBonus = getTimeBonus(responseTime);
       calculatedPoints = calculatePoints(basePoints, timeBonus);
-      setPointsEarned(calculatedPoints);
+      
+      // Store points for later award
+      setPendingPoints(calculatedPoints);
+      setPendingCorrect(true);
+      setPendingResponseTime(responseTime);
+      setHasPendingReward(true);
+      
       console.log(`[${debugId}] 💰 Points calculated: ${calculatedPoints} (HIDDEN until timer expires)`);
     }
     
-    // Update database immediately for leaderboard
-    await updatePlayerScoreInDB(calculatedPoints, isAnswerCorrect, responseTime);
+    // Only update database if we can reveal results immediately
+    if (canRevealResults()) {
+      console.log(`[${debugId}] ✅ Updating database immediately`);
+      await updatePlayerScoreInDB(calculatedPoints, isAnswerCorrect, responseTime);
+      setPointsEarned(calculatedPoints);
+    } else {
+      console.log(`[${debugId}] ⏳ Database update delayed until timer expires`);
+    }
     
     // CRITICAL: Only show results if timer allows it
     if (canRevealResults()) {
@@ -628,7 +662,29 @@ export default function Game() {
       console.log(`[${debugId}] 🎉 Timer expired - revealing results and points!`);
       setShowResult(true);
       
-      if (isCorrect && pointsEarned > 0) {
+      // Award pending points if we have them
+      if (hasPendingReward) {
+        console.log(`[${debugId}] 💰 Awarding pending points: ${pendingPoints}`);
+        
+        // Update database with pending points
+        updatePlayerScoreInDB(pendingPoints, pendingCorrect, pendingResponseTime);
+        
+        // Update UI
+        setPointsEarned(pendingPoints);
+        
+        // Only show animation if correct
+        if (pendingCorrect && pendingPoints > 0) {
+          setShowPointAnimation(true);
+          confetti({
+            particleCount: 100,
+            spread: 70,
+            origin: { y: 0.6 }
+          });
+        }
+        
+        // Clear pending reward
+        setHasPendingReward(false);
+      } else if (isCorrect && pointsEarned > 0) {
         setShowPointAnimation(true);
         confetti({
           particleCount: 100,
@@ -637,7 +693,7 @@ export default function Game() {
         });
       }
     }
-  }, [timerExpired, hasAnswered, showResult, isCorrect, pointsEarned, currentActivation, debugId]);
+  }, [timerExpired, hasAnswered, showResult, isCorrect, pointsEarned, currentActivation, debugId, hasPendingReward, pendingPoints, pendingCorrect, pendingResponseTime]);
   
   const renderMediaContent = () => {
     if (!currentActivation?.media_url || currentActivation.media_type === 'none') return null;

@@ -317,7 +317,8 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
     if (pollState === 'closed') {
       const voteCount = getVoteCount(option);
       const percentage = animatedTotalVotes > 0 ? (voteCount / animatedTotalVotes * 100) : 0;
-      return Math.max(percentage, voteCount > 0 ? 4 : 0); // Minimum 4% for visibility if there are votes
+      // Ensure minimum width for options with votes
+      return Math.max(percentage, voteCount > 0 ? 4 : 0);
     }
     
     return barWidths[optionId] || 0;
