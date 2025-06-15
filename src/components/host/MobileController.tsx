@@ -456,7 +456,7 @@ export default function MobileController() {
         throw new Error('Activation not found');
       }
       
-      // If timer isn't started yet, start it immediately
+      // If timer isn't started yet, start it immediately without any placeholder
       if (!activation.timer_started_at && activation.time_limit) {
         // Start the timer
         const { error: updateError } = await supabase

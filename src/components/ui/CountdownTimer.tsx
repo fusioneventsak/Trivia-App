@@ -73,17 +73,6 @@ const CountdownTimer: React.FC<CountdownTimerProps> = ({
         setTimeRemaining(remainingSeconds);
         setProgress((remainingSeconds / duration) * 100);
       });
-    } else {
-      // No start time provided, just use initialSeconds
-      setTimeRemaining(duration);
-      totalTimeRef.current = duration;
-      setProgress(100);
-      
-      // Force immediate render to avoid flicker
-      requestAnimationFrame(() => {
-        setTimeRemaining(duration);
-        setProgress(100);
-      });
     }
     
     // Use requestAnimationFrame for iOS devices to avoid background throttling

@@ -226,23 +226,6 @@ export default function Game() {
       return;
     }
     
-    // If timer hasn't started yet, just show the time limit
-    if (!activation.timer_started_at) {
-      console.log(`[${debugId}] ⏳ Timer not started yet - waiting for host`);
-      setTimerState({
-        isActive: false,
-        timeRemaining: activation.time_limit,
-        hasExpired: false,
-        startedAt: null,
-        totalTime: activation.time_limit
-      });
-      setTimeRemaining(activation.time_limit);
-      setHasActiveTimer(false);
-      setTimerExpired(false);
-      setShowAnswers(false); // Never show answers until timer starts
-      return;
-    }
-    
     // Timer has started - check if answers should be shown
     if (activation.show_answers === true) {
       console.log(`[${debugId}] ✅ Host has revealed answers`);
@@ -378,20 +361,6 @@ export default function Game() {
         },
         ref: 'raf'
       } as any;
-    } else {
-      console.log(`[${debugId}] ⏳ Timer not started yet`);
-      setTimerState({
-        isActive: false,
-        timeRemaining: activation.time_limit,
-        hasExpired: false,
-        startedAt: null,
-        totalTime: activation.time_limit
-      });
-      // Legacy compatibility
-      setTimeRemaining(activation.time_limit);
-      setHasActiveTimer(false);
-      setTimerExpired(false);
-      setShowAnswers(false);
     }
   };
 

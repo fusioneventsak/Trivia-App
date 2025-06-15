@@ -125,9 +125,6 @@ export default function Results() {
       requestAnimationFrame(updateTimer);
       
       timerIntervalRef.current = setInterval(updateTimer, 1000);
-    } else if (currentActivation?.time_limit && !currentActivation?.timer_started_at) {
-      // Timer hasn't started yet - show the total time
-      setTimeRemaining(currentActivation.time_limit);
     }
 
     return () => {
