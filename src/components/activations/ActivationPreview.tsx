@@ -97,21 +97,41 @@ const ActivationPreview: React.FC<{ activation: Activation }> = ({ activation })
     // If time limit is set, start the timer
     if (activation.time_limit && activation.time_limit > 0) {
       setTimeRemaining(activation.time_limit);
-      setShowAnswers(false);
+      setShowAnswers(activation.show_answers === true);
       
-      // Start countdown
-      const timer = setInterval(() => {
-        setTimeRemaining(prev => {
-          if (prev === null || prev <= 1) {
-            clearInterval(timer);
-            setShowAnswers(activation.show_answers !== false);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-      
-      return () => clearInterval(timer);
+      // Only start countdown if timer_started_at is set
+      if (activation.timer_started_at) {
+        const startTime = new Date(activation.timer_started_at).getTime();
+        const currentTime = Date.now();
+        const elapsedMs = currentTime - startTime;
+        const totalTimeMs = activation.time_limit * 1000;
+        
+        // If timer has already expired
+        if (elapsedMs >= totalTimeMs) {
+          setTimeRemaining(0);
+          setShowAnswers(activation.show_answers !== false);
+          return;
+        }
+        
+        // Calculate remaining time
+        const remainingMs = totalTimeMs - elapsedMs;
+        const remainingSeconds = Math.ceil(remainingMs / 1000);
+        setTimeRemaining(remainingSeconds);
+        
+        // Start countdown
+        const timer = setInterval(() => {
+          setTimeRemaining(prev => {
+            if (prev === null || prev <= 1) {
+              clearInterval(timer);
+              setShowAnswers(activation.show_answers !== false);
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
+        
+        return () => clearInterval(timer);
+      }
     }
   }, [activation.time_limit, activation.show_answers, activation.poll_state]);
   

@@ -87,6 +87,7 @@ export default function Results() {
   useEffect(() => {
     if (timerIntervalRef.current) {
       clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
     }
 
     // Reset timer state
@@ -113,12 +114,13 @@ export default function Results() {
           
           if (timerIntervalRef.current) {
             clearInterval(timerIntervalRef.current);
+            timerIntervalRef.current = null;
           }
         }
       };
 
       updateTimer(); // Initial update
-      timerIntervalRef.current = setInterval(updateTimer, 100);
+      timerIntervalRef.current = setInterval(updateTimer, 1000);
     } else if (currentActivation?.time_limit && !currentActivation?.timer_started_at) {
       // Timer hasn't started yet - show the total time
       setTimeRemaining(currentActivation.time_limit);
@@ -127,6 +129,7 @@ export default function Results() {
     return () => {
       if (timerIntervalRef.current) {
         clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
       }
     };
   }, [currentActivation?.time_limit, currentActivation?.timer_started_at, currentActivation?.show_answers]);
@@ -497,7 +500,7 @@ export default function Results() {
               {/* Timer display - Enhanced with NaN protection */}
               {currentActivation.time_limit && timeRemaining !== null && !isNaN(timeRemaining) && (
                 <div className="flex justify-center mb-6">
-                  <div className="bg-white/20 px-6 py-3 rounded-lg">
+                  <div className="bg-white/20 px-6 py-3 rounded-lg shadow-lg">
                     {currentActivation.timer_started_at && !currentActivation.show_answers ? (
                       <CountdownTimer 
                         duration={timeRemaining} 
@@ -510,7 +513,7 @@ export default function Results() {
                       />
                     ) : (
                       <div className="text-white text-xl font-mono">
-                        {currentActivation.show_answers ? 'Time\'s Up!' : `${currentActivation.time_limit}s`}
+                        {currentActivation.show_answers ? 'Time\'s Up!' : currentActivation.timer_started_at ? `${timeRemaining}s` : `${currentActivation.time_limit}s`}
                       </div>
                     )}
                   </div>
