@@ -62,9 +62,10 @@ export default function Game() {
   const [showPointAnimation, setShowPointAnimation] = useState(false);
   const [playerScore, setPlayerScore] = useState<number>(0);
   const [responseStartTime, setResponseStartTime] = useState<number | null>(null);
-  const [showAnswers, setShowAnswers] = useState(false); // ALWAYS start with false
+  const [showAnswers, setShowAnswers] = useState(false); // ABSOLUTELY NEVER START TRUE
   const [showNetworkStatus, setShowNetworkStatus] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
+  const [timerActive, setTimerActive] = useState(false); // Track if timer is actively running
   const [debugId] = useState(`game-${Math.random().toString(36).substring(2, 7)}`);
 
   // Timer reference for cleanup - EXACTLY LIKE RESULTS COMPONENT
@@ -85,17 +86,39 @@ export default function Game() {
     playerId: currentPlayerId
   });
 
-  // DEBUG: Log critical state changes
+  // CRITICAL: Absolute protection against early reveals
+  const canShowResults = () => {
+    const hasTimer = currentActivation?.time_limit && currentActivation?.timer_started_at;
+    const timerExpired = showAnswers === true;
+    const noTimer = !hasTimer;
+    
+    const canShow = noTimer || timerExpired;
+    console.log(`[${debugId}] canShowResults check:`, {
+      hasTimer,
+      timerExpired,
+      noTimer,
+      canShow,
+      timeRemaining,
+      activationType: currentActivation?.type
+    });
+    
+    return canShow;
+  };
+
+  // DEBUG: Log critical state changes with mobile detection
   useEffect(() => {
-    console.log(`[${debugId}] Critical state update:`, {
+    const isMobile = window.innerWidth < 640;
+    console.log(`[${debugId}] MOBILE(${isMobile}) State update:`, {
       hasAnswered,
       showAnswers,
       showResult,
       timeRemaining,
+      timerActive,
       activationType: currentActivation?.type,
-      pointsEarned
+      pointsEarned,
+      canShowResults: canShowResults()
     });
-  }, [hasAnswered, showAnswers, showResult, timeRemaining, currentActivation?.type, pointsEarned, debugId]);
+  }, [hasAnswered, showAnswers, showResult, timeRemaining, timerActive, currentActivation?.type, pointsEarned, debugId]);
 
   // Check if player exists
   useEffect(() => {
@@ -297,7 +320,8 @@ export default function Game() {
     
     // Reset timer state
     setTimeRemaining(null);
-    setShowAnswers(false); // ALWAYS start with false for fair scoring
+    setTimerActive(false);
+    setShowAnswers(false); // ABSOLUTELY CRITICAL: ALWAYS start with false
     
     // If no activation or no time limit, show answers and return
     if (!activation || !activation.time_limit) {
@@ -319,6 +343,7 @@ export default function Game() {
       if (elapsedMs >= totalTimeMs) {
         console.log(`[${debugId}] Timer already expired, showing answers`);
         setTimeRemaining(0);
+        setTimerActive(false);
         setShowAnswers(true); // Always show answers when timer expires
         return;
       }
@@ -327,6 +352,7 @@ export default function Game() {
       const remainingMs = totalTimeMs - elapsedMs;
       const remainingSeconds = Math.ceil(remainingMs / 1000);
       setTimeRemaining(remainingSeconds);
+      setTimerActive(true);
       setShowAnswers(false); // Keep answers hidden
       console.log(`[${debugId}] Starting timer with ${remainingSeconds} seconds remaining`);
       
@@ -335,12 +361,13 @@ export default function Game() {
         setTimeRemaining(prev => {
           if (prev === null || prev <= 1) {
             // Time's up - clear interval and always show answers
-            console.log(`[${debugId}] Timer completed! Showing answers now.`);
+            console.log(`[${debugId}] ⏰ TIMER COMPLETED! Showing answers now.`);
             if (timerIntervalRef.current) {
               clearInterval(timerIntervalRef.current);
               timerIntervalRef.current = null;
             }
             
+            setTimerActive(false);
             setShowAnswers(true); // Always show answers when timer expires
             
             return 0;
@@ -351,6 +378,7 @@ export default function Game() {
     } else {
       console.log(`[${debugId}] Timer not started yet, keeping answers hidden`);
       setTimeRemaining(activation.time_limit);
+      setTimerActive(false);
       setShowAnswers(false);
     }
   };
@@ -369,7 +397,7 @@ export default function Game() {
   
   const handleMultipleChoiceAnswer = async (answer: string, optionId?: string) => {
     if (hasAnswered || !currentActivation || !currentPlayerId) return;
-    console.log(`[${debugId}] Handling multiple choice answer: ${answer}, showAnswers: ${showAnswers}`);
+    console.log(`[${debugId}] 🎯 Multiple choice answer: ${answer}, showAnswers: ${showAnswers}, canShowResults: ${canShowResults()}`);
     
     setSelectedAnswer(answer);
     if (optionId) setSelectedOptionId(optionId);
@@ -388,15 +416,15 @@ export default function Game() {
       
       // Store points for later display but DON'T show yet
       setPointsEarned(calculatedPoints);
-      console.log(`[${debugId}] Calculated points: ${calculatedPoints}, but not showing until timer completes`);
+      console.log(`[${debugId}] 💰 Calculated points: ${calculatedPoints}, but HIDDEN until timer completes`);
     }
     
     // ALWAYS update database score immediately (for leaderboard accuracy)
     await updatePlayerScoreInDB(calculatedPoints, isAnswerCorrect, responseTime);
     
     // CRITICAL: Only show results if timer has already expired
-    if (showAnswers) {
-      console.log(`[${debugId}] Timer already completed, showing results immediately`);
+    if (canShowResults()) {
+      console.log(`[${debugId}] ✅ Timer completed, showing results immediately`);
       setShowResult(true);
       if (isAnswerCorrect && calculatedPoints > 0) {
         setShowPointAnimation(true);
@@ -408,14 +436,14 @@ export default function Game() {
         });
       }
     } else {
-      console.log(`[${debugId}] Timer still running, hiding results until completion`);
+      console.log(`[${debugId}] ⏳ Timer still running, HIDING results until completion`);
     }
   };
   
   const handleTextAnswerSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (hasAnswered || !currentActivation || !currentPlayerId || !textAnswer.trim()) return;
-    console.log(`[${debugId}] Handling text answer submission: ${textAnswer}, showAnswers: ${showAnswers}`);
+    console.log(`[${debugId}] 📝 Text answer submission: ${textAnswer}, showAnswers: ${showAnswers}, canShowResults: ${canShowResults()}`);
     
     setHasAnswered(true);
     
@@ -435,15 +463,15 @@ export default function Game() {
       
       // Store points for later display but DON'T show yet
       setPointsEarned(calculatedPoints);
-      console.log(`[${debugId}] Calculated points: ${calculatedPoints}, but not showing until timer completes`);
+      console.log(`[${debugId}] 💰 Calculated points: ${calculatedPoints}, but HIDDEN until timer completes`);
     }
     
     // ALWAYS update database score immediately (for leaderboard accuracy)
     await updatePlayerScoreInDB(calculatedPoints, isAnswerCorrect, responseTime);
     
     // CRITICAL: Only show results if timer has already expired
-    if (showAnswers) {
-      console.log(`[${debugId}] Timer already completed, showing results immediately`);
+    if (canShowResults()) {
+      console.log(`[${debugId}] ✅ Timer completed, showing results immediately`);
       setShowResult(true);
       if (isAnswerCorrect && calculatedPoints > 0) {
         setShowPointAnimation(true);
@@ -455,7 +483,7 @@ export default function Game() {
         });
       }
     } else {
-      console.log(`[${debugId}] Timer still running, hiding results until completion`);
+      console.log(`[${debugId}] ⏳ Timer still running, HIDING results until completion`);
     }
   };
   
@@ -562,7 +590,7 @@ export default function Game() {
   useEffect(() => {
     if (showAnswers && hasAnswered && !showResult && (currentActivation?.type === 'multiple_choice' || currentActivation?.type === 'text_answer')) {
       // Timer just completed, now show results and points if correct
-      console.log(`[${debugId}] Timer completed - revealing results and points!`);
+      console.log(`[${debugId}] 🎉 Timer completed - revealing results and points!`);
       setShowResult(true);
       
       if (isCorrect && pointsEarned > 0) {
@@ -659,9 +687,21 @@ export default function Game() {
         </div>
       )}
       
+      {/* PROMINENT MOBILE TIMER - ALWAYS VISIBLE WHEN ACTIVE */}
+      {timerActive && timeRemaining !== null && timeRemaining >= 0 && (
+        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-40 block sm:hidden">
+          <div className="flex items-center px-6 py-3 bg-red-500/90 backdrop-blur-md rounded-full text-white font-mono text-lg border-2 border-white/50 shadow-2xl animate-pulse">
+            <Clock className="w-6 h-6 mr-3 text-yellow-300" />
+            <span className="font-bold text-xl min-w-[4rem] text-center">
+              {Math.floor(timeRemaining / 60)}:{(timeRemaining % 60).toString().padStart(2, '0')}
+            </span>
+          </div>
+        </div>
+      )}
+      
       <div className="max-w-4xl mx-auto">
-        {/* Header - IMPROVED MOBILE VISIBILITY */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-4">
+        {/* Header - DESKTOP TIMER ONLY */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-4 mt-20 sm:mt-0">
           <div className="flex items-center">
             {room?.logo_url && (
               <img 
@@ -680,9 +720,9 @@ export default function Game() {
               showIcon={true}
             />
             
-            {/* MOBILE-OPTIMIZED TIMER DISPLAY - ALWAYS VISIBLE WHEN ACTIVE */}
+            {/* DESKTOP TIMER DISPLAY */}
             {timeRemaining !== null && timeRemaining >= 0 && (
-              <div className="flex items-center px-3 py-2 bg-white/20 backdrop-blur-sm rounded-full text-white font-mono text-sm sm:text-base border border-white/30">
+              <div className="hidden sm:flex items-center px-4 py-2 bg-white/20 backdrop-blur-sm rounded-full text-white font-mono text-base border border-white/30">
                 <Clock className="w-4 h-4 mr-2 flex-shrink-0" />
                 <span className="font-bold min-w-[3rem] text-center">
                   {Math.floor(timeRemaining / 60)}:{(timeRemaining % 60).toString().padStart(2, '0')}
@@ -690,7 +730,7 @@ export default function Game() {
               </div>
             )}
             
-            {/* TIMER FOR POLLS - MOBILE OPTIMIZED */}
+            {/* POLL TIMER */}
             {currentActivation?.type === 'poll' && currentActivation.time_limit && currentActivation.timer_started_at && (
               <div className="flex items-center px-3 py-2 bg-yellow-500/20 backdrop-blur-sm rounded-full text-white font-mono text-sm border border-yellow-500/30">
                 <Clock className="w-4 h-4 mr-2 flex-shrink-0" />
@@ -749,8 +789,9 @@ export default function Game() {
                     {currentActivation.options?.map((option, index) => {
                       const isSelected = option.text === selectedAnswer;
                       const isCorrectAnswer = option.text === currentActivation.correct_answer;
-                      const showCorrect = hasAnswered && showAnswers && isCorrectAnswer;
-                      const showIncorrect = hasAnswered && showAnswers && isSelected && !isCorrectAnswer;
+                      // CRITICAL: Only show correct/incorrect if canShowResults() returns true
+                      const showCorrect = hasAnswered && canShowResults() && isCorrectAnswer;
+                      const showIncorrect = hasAnswered && canShowResults() && isSelected && !isCorrectAnswer;
                       
                       return (
                         <button
@@ -817,7 +858,8 @@ export default function Game() {
                       </button>
                     )}
                     
-                    {showResult && showAnswers && (
+                    {/* CRITICAL: Only show results if canShowResults() returns true */}
+                    {showResult && canShowResults() && (
                       <div className={`p-4 rounded-lg ${isCorrect ? 'bg-green-400/30' : 'bg-red-400/30'}`}>
                         <div className="flex items-center gap-2 text-white">
                           {isCorrect ? (
@@ -902,8 +944,8 @@ export default function Game() {
           </div>
         )}
         
-        {/* Point Animation - Only show when timer has completed AND results are shown */}
-        {showPointAnimation && showAnswers && showResult && pointsEarned > 0 && (
+        {/* Point Animation - TRIPLE PROTECTION */}
+        {showPointAnimation && canShowResults() && showResult && pointsEarned > 0 && (
           <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50">
             <PointAnimation 
               points={pointsEarned} 
