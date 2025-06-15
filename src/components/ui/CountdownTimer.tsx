@@ -26,8 +26,17 @@ const CountdownTimer: React.FC<CountdownTimerProps> = ({
   const [isComplete, setIsComplete] = useState<boolean>(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const totalTimeRef = useRef<number>(initialSeconds);
+  const [isMobile, setIsMobile] = useState(false);
   
   useEffect(() => {
+    // Check if we're on mobile
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    
     let intervalId: NodeJS.Timeout | null = null;
     
     // If we have a start time, calculate the remaining time based on that
@@ -86,6 +95,7 @@ const CountdownTimer: React.FC<CountdownTimerProps> = ({
       if (intervalId) {
         clearInterval(intervalId);
       }
+      window.removeEventListener('resize', checkMobile);
     };
   }, [initialSeconds, startTime, onComplete]);
   
@@ -111,8 +121,14 @@ const CountdownTimer: React.FC<CountdownTimerProps> = ({
     return 'bg-green-500/30';
   };
   
+  // Special mobile styles for better visibility
+  const mobileStyles = isMobile ? {
+    container: "fixed top-4 left-4 right-4 z-50 flex justify-center",
+    timer: "bg-red-600 text-white px-6 py-4 rounded-xl shadow-2xl border-4 border-yellow-400 animate-pulse"
+  } : null;
+  
   return (
-    <div className="flex flex-col items-center">
+    <div className={cn("flex flex-col items-center", isMobile && variant !== 'small' && "w-full")}>
       <div 
         className={cn(
           "inline-flex items-center justify-center rounded-full text-white font-mono font-bold",

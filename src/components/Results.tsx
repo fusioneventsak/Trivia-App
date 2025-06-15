@@ -84,6 +84,7 @@ export default function Results() {
   const currentActivationIdRef = useRef<string | null>(null);
   const gameSessionChannelRef = useRef<any>(null);
   const [showNetworkStatus, setShowNetworkStatus] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
   // Poll management
   const {
@@ -99,6 +100,16 @@ export default function Results() {
     debugMode
   });
 
+  // Check if we're on mobile
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
   // Toggle debug mode with key sequence
   useEffect(() => {
     const keys: string[] = [];
@@ -689,7 +700,7 @@ export default function Results() {
                   <CountdownTimer 
                     initialSeconds={currentActivation.time_limit}
                     startTime={currentActivation.timer_started_at}
-                    variant="large"
+                    variant={isMobile ? "default" : "large"}
                     onComplete={() => setShowAnswers(true)}
                     showProgressBar={true}
                   />
