@@ -731,10 +731,32 @@ export default function MobileController() {
             <button
               onClick={manageTimer}
               disabled={loading}
-              className="flex flex-col items-center justify-center p-4 bg-blue-600 text-white rounded-lg shadow-sm disabled:opacity-50"
+              className="flex flex-col items-center justify-center p-4 bg-blue-600 text-white rounded-lg shadow-lg disabled:opacity-50 relative overflow-hidden"
             >
-              <Clock className="w-8 h-8 mb-1" />
-              <span>{activeType === 'poll' ? 'Start Timer / Show Results' : 'Start Timer / Show Answers'}</span>
+              <div className="absolute inset-0 bg-gradient-to-r from-blue-600 to-indigo-600"></div>
+              <div className="relative z-10">
+                <Clock className="w-8 h-8 mb-2" />
+                <div className="text-center">
+                  <span className="font-bold text-lg">
+                    {!currentActivation?.timer_started_at 
+                      ? 'Start Timer' 
+                      : currentActivation?.show_answers 
+                        ? 'Reset Timer'
+                        : activeType === 'poll' 
+                          ? 'Show Results' 
+                          : 'Show Answers'
+                    }
+                  </span>
+                  <div className="text-xs text-white/80 mt-1">
+                    {!currentActivation?.timer_started_at 
+                      ? 'Players can answer once timer starts' 
+                      : currentActivation?.show_answers
+                        ? 'Start a new timer cycle'
+                        : 'Reveal correct answers to players'
+                    }
+                  </div>
+                </div>
+              </div>
             </button>
           </div>
         </section>
