@@ -786,4 +786,317 @@ export default function Game() {
     return () => {
       if (timerIntervalRef.current) {
         // Check if it's a requestAnimationFrame ID
-        if (typeof timerIntervalRef.current === 'object' && timerIntervalRef.current.ref === '
+        if (typeof timerIntervalRef.current === 'object' && timerIntervalRef.current.ref === 'raf') {
+          cancelAnimationFrame(timerIntervalRef.current[Symbol.toPrimitive]());
+        } else {
+          clearInterval(timerIntervalRef.current);
+        }
+        timerIntervalRef.current = null;
+      }
+    };
+  }, [currentActivation?.id]);
+
+  // Mobile detection
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-indigo-600" />
+          <p className="text-gray-600">Loading game...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-red-50 to-pink-100 flex items-center justify-center p-4">
+        <div className="bg-white rounded-lg shadow-lg p-6 max-w-md w-full text-center">
+          <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+          <h2 className="text-xl font-bold text-gray-900 mb-2">Oops!</h2>
+          <p className="text-gray-600 mb-4">{error}</p>
+          {showNetworkStatus && <NetworkStatus />}
+          <button
+            onClick={() => window.location.reload()}
+            className="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 transition-colors"
+          >
+            Try Again
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentPlayerId) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+        <div className="bg-white rounded-lg shadow-lg p-6 max-w-md w-full text-center">
+          <Users className="h-12 w-12 text-indigo-500 mx-auto mb-4" />
+          <h2 className="text-xl font-bold text-gray-900 mb-2">Join the Game</h2>
+          <p className="text-gray-600 mb-4">You need to join the game first to participate.</p>
+          <button
+            onClick={() => navigate(`/join/${roomId}`)}
+            className="bg-indigo-500 text-white px-6 py-2 rounded-lg hover:bg-indigo-600 transition-colors"
+          >
+            Join Game
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentActivation) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-100 flex items-center justify-center p-4">
+        <div className="bg-white rounded-lg shadow-lg p-6 max-w-md w-full text-center">
+          <Clock className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+          <h2 className="text-xl font-bold text-gray-900 mb-2">Waiting for Host</h2>
+          <p className="text-gray-600 mb-4">The host hasn't started any questions yet. Please wait...</p>
+          <div className="flex items-center justify-center space-x-2">
+            <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
+            <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+            <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Leaderboard display
+  if (currentActivation.type === 'leaderboard') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-yellow-50 to-orange-100 p-4">
+        <div className="max-w-4xl mx-auto">
+          <div className="bg-white rounded-lg shadow-lg p-6">
+            <div className="text-center mb-6">
+              <Trophy className="h-12 w-12 text-yellow-500 mx-auto mb-4" />
+              <h1 className="text-2xl font-bold text-gray-900">Leaderboard</h1>
+            </div>
+            <LeaderboardDisplay roomId={room?.id} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Poll display
+  if (currentActivation.type === 'poll') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-100 p-4">
+        <div className="max-w-4xl mx-auto">
+          <div className="bg-white rounded-lg shadow-lg p-6">
+            <PollDisplay
+              activation={currentActivation}
+              onVote={handlePollVote}
+              hasVoted={pollVoted}
+              selectedOptionId={pollSelectedOptionId}
+              votes={pollVotes}
+              totalVotes={totalVotes}
+              isLoading={pollLoading}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <ErrorBoundary>
+      <div 
+        className="min-h-screen p-4"
+        style={{
+          background: `linear-gradient(135deg, ${theme?.background_color || '#F3F4F6'}, ${theme?.secondary_color || '#8B5CF6'}20)`
+        }}
+      >
+        <div className="max-w-4xl mx-auto">
+          {/* Header */}
+          <div className="bg-white rounded-lg shadow-lg p-4 mb-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                {room?.logo_url && (
+                  <img 
+                    src={getStorageUrl(room.logo_url)} 
+                    alt="Room Logo" 
+                    className="h-10 w-10 rounded-full object-cover"
+                  />
+                )}
+                <div>
+                  <h1 className="text-lg font-bold" style={{ color: theme?.text_color || '#1F2937' }}>
+                    {room?.name}
+                  </h1>
+                  <p className="text-sm text-gray-500">
+                    {getCurrentPlayer()?.name}
+                  </p>
+                </div>
+              </div>
+              <PointsDisplay score={playerScore} />
+            </div>
+          </div>
+
+          {/* Question Card */}
+          <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+            {/* Timer */}
+            {currentActivation.time_limit && (
+              <div className="mb-6">
+                <CountdownTimer
+                  timeRemaining={timeRemaining}
+                  totalTime={currentActivation.time_limit}
+                  isActive={hasActiveTimer}
+                  onExpire={() => {
+                    console.log(`[${debugId}] Timer expired callback triggered`);
+                    setTimerExpired(true);
+                    setHasActiveTimer(false);
+                  }}
+                />
+              </div>
+            )}
+
+            {/* Media */}
+            {currentActivation.media_type !== 'none' && currentActivation.media_url && (
+              <div className="mb-6">
+                <MediaDisplay
+                  type={currentActivation.media_type}
+                  url={currentActivation.media_url}
+                  className="rounded-lg"
+                />
+              </div>
+            )}
+
+            {/* Question */}
+            <h2 className="text-xl font-bold mb-6" style={{ color: theme?.text_color || '#1F2937' }}>
+              {currentActivation.question}
+            </h2>
+
+            {/* Multiple Choice Options */}
+            {currentActivation.type === 'multiple_choice' && currentActivation.options && (
+              <div className="space-y-3">
+                {currentActivation.options.map((option, index) => {
+                  const isSelected = selectedAnswer === option.text;
+                  const isCorrectOption = showAnswers && option.text === currentActivation.correct_answer;
+                  const isWrongSelected = showAnswers && isSelected && option.text !== currentActivation.correct_answer;
+                  
+                  return (
+                    <button
+                      key={index}
+                      onClick={() => handleMultipleChoiceAnswer(option.text, option.id)}
+                      disabled={hasAnswered}
+                      className={`w-full p-4 rounded-lg border-2 text-left transition-all duration-200 ${
+                        isCorrectOption
+                          ? 'border-green-500 bg-green-50 text-green-800'
+                          : isWrongSelected
+                          ? 'border-red-500 bg-red-50 text-red-800'
+                          : isSelected
+                          ? `border-blue-500 bg-blue-50`
+                          : hasAnswered
+                          ? 'border-gray-200 bg-gray-50 text-gray-500 cursor-not-allowed'
+                          : 'border-gray-200 hover:border-blue-300 hover:bg-blue-50'
+                      }`}
+                      style={{
+                        borderColor: isSelected && !showAnswers ? theme?.primary_color || '#6366F1' : undefined,
+                        backgroundColor: isSelected && !showAnswers ? `${theme?.primary_color || '#6366F1'}10` : undefined
+                      }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium">{option.text}</span>
+                        {showAnswers && (
+                          <>
+                            {isCorrectOption && <CheckCircle className="h-5 w-5 text-green-600" />}
+                            {isWrongSelected && <XCircle className="h-5 w-5 text-red-600" />}
+                          </>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Text Answer */}
+            {currentActivation.type === 'text_answer' && (
+              <form onSubmit={handleTextAnswerSubmit} className="space-y-4">
+                <div>
+                  <input
+                    type="text"
+                    value={textAnswer}
+                    onChange={(e) => setTextAnswer(e.target.value)}
+                    placeholder="Type your answer here..."
+                    disabled={hasAnswered}
+                    className="w-full p-4 border-2 border-gray-200 rounded-lg focus:border-blue-500 focus:outline-none disabled:bg-gray-50 disabled:cursor-not-allowed"
+                    style={{
+                      borderColor: textAnswer ? theme?.primary_color || '#6366F1' : undefined
+                    }}
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={hasAnswered || !textAnswer.trim()}
+                  className="w-full p-4 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+                  style={{
+                    backgroundColor: theme?.primary_color || '#6366F1',
+                    color: 'white'
+                  }}
+                >
+                  <Send className="h-5 w-5" />
+                  <span>Submit Answer</span>
+                </button>
+              </form>
+            )}
+
+            {/* Results */}
+            {showResult && (
+              <div className="mt-6 p-4 rounded-lg border-2" style={{
+                borderColor: isCorrect ? '#10B981' : '#EF4444',
+                backgroundColor: isCorrect ? '#ECFDF5' : '#FEF2F2'
+              }}>
+                <div className="flex items-center space-x-3">
+                  {isCorrect ? (
+                    <CheckCircle className="h-6 w-6 text-green-600" />
+                  ) : (
+                    <XCircle className="h-6 w-6 text-red-600" />
+                  )}
+                  <div>
+                    <p className={`font-medium ${isCorrect ? 'text-green-800' : 'text-red-800'}`}>
+                      {isCorrect ? 'Correct!' : 'Incorrect'}
+                    </p>
+                    {pointsEarned > 0 && (
+                      <p className="text-sm text-green-700">
+                        +{pointsEarned} points earned!
+                      </p>
+                    )}
+                  </div>
+                </div>
+                
+                {showAnswers && currentActivation.type === 'text_answer' && (
+                  <div className="mt-3 pt-3 border-t border-gray-200">
+                    <p className="text-sm text-gray-600">
+                      Correct answer: <span className="font-medium">{currentActivation.exact_answer}</span>
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Point Animation */}
+          {showPointAnimation && (
+            <PointAnimation
+              points={pointsEarned}
+              onComplete={() => setShowPointAnimation(false)}
+            />
+          )}
+        </div>
+      </div>
+    </ErrorBoundary>
+  );
+}
