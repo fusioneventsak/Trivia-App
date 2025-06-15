@@ -612,9 +612,7 @@ export default function Results() {
                     <div className="text-center py-12">
                       <Clock className="w-16 h-16 text-white/50 mx-auto mb-4" />
                       <p className="text-white/70 text-xl">
-                        {currentActivation.timer_started_at 
-                          ? 'Waiting for host to reveal answers...' 
-                          : 'Waiting for timer to start...'}
+                        Waiting for host to reveal answers...
                       </p>
                     </div>
                   )}

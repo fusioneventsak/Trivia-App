@@ -133,13 +133,13 @@ export default function Game() {
       return true;
     }
     
-    // Has a timer but not started? Cannot answer or reveal
+    // Has a timer but not started? Cannot reveal results
     if (currentActivation?.time_limit && !currentActivation?.timer_started_at) {
       console.log(`[${debugId}] 🔴 Timer configured but not started - CANNOT reveal results`);
       return false;
     }
     
-    // Has a timer and it has started? Can answer but not reveal results yet
+    // Has a timer and it has started? Can answer but not reveal results until host allows
     if (currentActivation?.time_limit && currentActivation?.timer_started_at) {
       console.log(`[${debugId}] 🟡 Timer started - can answer but not reveal results until host allows`);
       return false;
@@ -1060,7 +1060,7 @@ export default function Game() {
                       <button
                         key={index}
                         onClick={() => handleMultipleChoiceAnswer(option.text, option.id)}
-                        disabled={hasAnswered}
+                        disabled={hasAnswered || (currentActivation.time_limit && !currentActivation.timer_started_at)}
                         className={`w-full p-4 rounded-lg text-left transition-all ${
                           hasAnswered
                             ? selectedAnswer === option.text
@@ -1100,13 +1100,13 @@ export default function Game() {
                       type="text"
                       value={textAnswer}
                       onChange={(e) => setTextAnswer(e.target.value)}
-                      disabled={hasAnswered}
+                      disabled={hasAnswered || (currentActivation.time_limit && !currentActivation.timer_started_at)}
                       placeholder="Type your answer..."
                       className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:border-white/40 disabled:opacity-50"
                     />
                     <button
                       type="submit"
-                      disabled={hasAnswered || !textAnswer.trim()}
+                      disabled={hasAnswered || !textAnswer.trim() || (currentActivation.time_limit && !currentActivation.timer_started_at)}
                       className={`w-full px-4 py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all ${
                         hasAnswered
                           ? 'bg-white/10 text-white/50 cursor-not-allowed'
