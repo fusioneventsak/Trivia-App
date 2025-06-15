@@ -636,6 +636,7 @@ export default function Game() {
             addPlayer(existingPlayer);
             setPlayerScore(existingPlayer.score || 0);
             console.log(`[${debugId}] Found existing player:`, existingPlayer.name);
+            // Note: Analytics for player join/rejoin is handled in PlayerEntry component
           }
         }
 
