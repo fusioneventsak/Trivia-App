@@ -64,7 +64,11 @@ export default function Game() {
   const [responseStartTime, setResponseStartTime] = useState<number | null>(null);
   const [showAnswers, setShowAnswers] = useState(true);
   const [showNetworkStatus, setShowNetworkStatus] = useState(false);
+  const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
   const [debugId] = useState(`game-${Math.random().toString(36).substring(2, 7)}`);
+
+  // Timer reference for cleanup
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Poll management - Now using the simplified polling version
   const {
@@ -155,6 +159,10 @@ export default function Game() {
     
     return () => {
       cleanup.then(fn => fn && fn());
+      // Cleanup timer on unmount
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
     };
   }, [roomId, currentPlayerId, navigate]);
   
@@ -225,22 +233,8 @@ export default function Game() {
       setCurrentActivation(data);
       resetAnswerState();
       
-      // Check if timer has already started
-      if (data.time_limit && data.timer_started_at) {
-        const startTime = new Date(data.timer_started_at).getTime();
-        const currentTime = new Date().getTime();
-        const elapsedMs = currentTime - startTime;
-        const totalTimeMs = data.time_limit * 1000;
-        
-        // If timer has already expired
-        if (elapsedMs >= totalTimeMs) {
-          setShowAnswers(data.show_answers !== false);
-        } else {
-          setShowAnswers(false);
-        }
-      } else {
-        setShowAnswers(data.show_answers !== false);
-      }
+      // Setup timer if there's a time limit
+      setupTimer(data);
       
       // Start response timer for questions
       if ((data.type === 'multiple_choice' || data.type === 'text_answer') && !hasAnswered) {
@@ -258,6 +252,66 @@ export default function Game() {
       } else {
         setError(getFriendlyErrorMessage(err));
       }
+    }
+  };
+
+  // Setup timer function to properly handle countdown
+  const setupTimer = (activation: Activation) => {
+    // Clear any existing timer
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    
+    // Reset timer state
+    setTimeRemaining(null);
+    setShowAnswers(false); // Hide answers initially
+    
+    // If no time limit, show answers immediately
+    if (!activation.time_limit) {
+      setShowAnswers(activation.show_answers !== false);
+      return;
+    }
+    
+    // Check if timer has already started
+    if (activation.timer_started_at) {
+      const startTime = new Date(activation.timer_started_at).getTime();
+      const currentTime = new Date().getTime();
+      const elapsedMs = currentTime - startTime;
+      const totalTimeMs = activation.time_limit * 1000;
+      
+      console.log(`[${debugId}] Timer calculation: elapsed=${elapsedMs}ms, total=${totalTimeMs}ms`);
+      
+      // If timer has already expired, show answers
+      if (elapsedMs >= totalTimeMs) {
+        setTimeRemaining(0);
+        setShowAnswers(true);
+        return;
+      }
+      
+      // Calculate remaining time
+      const remainingMs = totalTimeMs - elapsedMs;
+      const remainingSeconds = Math.ceil(remainingMs / 1000);
+      setTimeRemaining(remainingSeconds);
+      
+      // Start countdown
+      timerRef.current = setInterval(() => {
+        setTimeRemaining(prev => {
+          if (prev === null || prev <= 1) {
+            if (timerRef.current) {
+              clearInterval(timerRef.current);
+              timerRef.current = null;
+            }
+            setShowAnswers(true);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } else {
+      // Timer hasn't started yet, just set the initial time
+      setTimeRemaining(activation.time_limit);
+      setShowAnswers(false);
     }
   };
   
@@ -283,30 +337,43 @@ export default function Game() {
     const isAnswerCorrect = answer === currentActivation.correct_answer;
     setIsCorrect(isAnswerCorrect);
     
-    if (isAnswerCorrect) {
-      // Calculate points with time bonus
-      const basePoints = 100;
-      const timeBonus = getTimeBonus(responseTime);
-      const totalPoints = calculatePoints(basePoints, timeBonus);
+    // Don't show result or award points until timer completes
+    if (showAnswers) {
+      if (isAnswerCorrect) {
+        // Calculate points with time bonus
+        const basePoints = 100;
+        const timeBonus = getTimeBonus(responseTime);
+        const totalPoints = calculatePoints(basePoints, timeBonus);
+        
+        setPointsEarned(totalPoints);
+        setShowPointAnimation(true);
+        
+        // Update player score
+        await updatePlayerScoreInDB(totalPoints, true, responseTime);
+        
+        // Fire confetti
+        confetti({
+          particleCount: 100,
+          spread: 70,
+          origin: { y: 0.6 }
+        });
+      } else {
+        // Update stats for incorrect answer
+        await updatePlayerScoreInDB(0, false, responseTime);
+      }
       
-      setPointsEarned(totalPoints);
-      setShowPointAnimation(true);
-      
-      // Update player score
-      await updatePlayerScoreInDB(totalPoints, true, responseTime);
-      
-      // Fire confetti
-      confetti({
-        particleCount: 100,
-        spread: 70,
-        origin: { y: 0.6 }
-      });
+      setShowResult(true);
     } else {
-      // Update stats for incorrect answer
-      await updatePlayerScoreInDB(0, false, responseTime);
+      // Just update stats, don't show points until timer ends
+      if (isAnswerCorrect) {
+        const basePoints = 100;
+        const timeBonus = getTimeBonus(responseTime);
+        const totalPoints = calculatePoints(basePoints, timeBonus);
+        await updatePlayerScoreInDB(totalPoints, true, responseTime);
+      } else {
+        await updatePlayerScoreInDB(0, false, responseTime);
+      }
     }
-    
-    setShowResult(true);
   };
   
   const handleTextAnswerSubmit = async (e: React.FormEvent) => {
@@ -323,32 +390,46 @@ export default function Game() {
     
     setIsCorrect(isAnswerCorrect);
     
-    if (isAnswerCorrect) {
-      // Calculate points with time bonus
-      const basePoints = 150; // Text answers worth more
-      const timeBonus = getTimeBonus(responseTime);
-      const totalPoints = calculatePoints(basePoints, timeBonus);
+    // Don't show result or award points until timer completes
+    if (showAnswers) {
+      if (isAnswerCorrect) {
+        // Calculate points with time bonus
+        const basePoints = 150; // Text answers worth more
+        const timeBonus = getTimeBonus(responseTime);
+        const totalPoints = calculatePoints(basePoints, timeBonus);
+        
+        setPointsEarned(totalPoints);
+        setShowPointAnimation(true);
+        
+        // Update player score
+        await updatePlayerScoreInDB(totalPoints, true, responseTime);
+        
+        // Fire confetti
+        confetti({
+          particleCount: 100,
+          spread: 70,
+          origin: { y: 0.6 }
+        });
+      } else {
+        // Update stats for incorrect answer
+        await updatePlayerScoreInDB(0, false, responseTime);
+      }
       
-      setPointsEarned(totalPoints);
-      setShowPointAnimation(true);
-      
-      // Update player score
-      await updatePlayerScoreInDB(totalPoints, true, responseTime);
-      
-      // Fire confetti
-      confetti({
-        particleCount: 100,
-        spread: 70,
-        origin: { y: 0.6 }
-      });
+      setShowResult(true);
     } else {
-      // Update stats for incorrect answer
-      await updatePlayerScoreInDB(0, false, responseTime);
+      // Just update stats, don't show points until timer ends
+      if (isAnswerCorrect) {
+        const basePoints = 150;
+        const timeBonus = getTimeBonus(responseTime);
+        const totalPoints = calculatePoints(basePoints, timeBonus);
+        await updatePlayerScoreInDB(totalPoints, true, responseTime);
+      } else {
+        await updatePlayerScoreInDB(0, false, responseTime);
+      }
     }
-    
-    setShowResult(true);
   };
   
+  // UPDATED: Remove points for poll voting
   const handlePollVote = async (answer: string, optionId?: string) => {
     if (!currentActivation || !currentPlayerId) {
       console.log(`[${debugId}] Cannot submit poll vote - missing activation or player ID`);
@@ -378,20 +459,10 @@ export default function Game() {
     console.log(`[${debugId}] Poll vote submission result:`, result);
     
     if (result.success) {
-      // Award participation points for voting
-      const participationPoints = 25;
-      setPointsEarned(participationPoints);
-      setShowPointAnimation(true);
-      
-      // Update player score in database
-      await updatePlayerScoreInDB(participationPoints, false, 0);
-      
-      // Fire small confetti for voting
-      confetti({
-        particleCount: 50,
-        spread: 45,
-        origin: { y: 0.7 }
-      });
+      // REMOVED: No points awarded for poll voting
+      // REMOVED: No confetti animation for polls
+      // REMOVED: No point animation display
+      console.log(`[${debugId}] Poll vote submitted successfully - no points awarded`);
     } else {
       setError(result.error || 'Failed to submit vote. Please try again.');
       
@@ -453,10 +524,34 @@ export default function Game() {
       
     } catch (err: any) {
       console.error('Error updating player score:', err);
-      logError(err, 'Game.updatePlayerScoreInDB', currentPlayerId);
       setError('Failed to update score');
     }
   };
+  
+  // Watch for timer completion to show results and points
+  useEffect(() => {
+    if (showAnswers && hasAnswered && !showResult && (currentActivation?.type === 'multiple_choice' || currentActivation?.type === 'text_answer')) {
+      // Timer just completed, now show results and award points if correct
+      setShowResult(true);
+      
+      if (isCorrect) {
+        const responseTime = responseStartTime ? Date.now() - responseStartTime : 0;
+        const basePoints = currentActivation.type === 'text_answer' ? 150 : 100;
+        const timeBonus = getTimeBonus(responseTime);
+        const totalPoints = calculatePoints(basePoints, timeBonus);
+        
+        setPointsEarned(totalPoints);
+        setShowPointAnimation(true);
+        
+        // Fire confetti
+        confetti({
+          particleCount: 100,
+          spread: 70,
+          origin: { y: 0.6 }
+        });
+      }
+    }
+  }, [showAnswers, hasAnswered, showResult, isCorrect, currentActivation, responseStartTime]);
   
   const renderMediaContent = () => {
     if (!currentActivation?.media_url || currentActivation.media_type === 'none') return null;
@@ -560,13 +655,12 @@ export default function Game() {
               showIcon={true}
             />
             
-            {currentActivation?.time_limit && currentActivation?.timer_started_at && (
-              <CountdownTimer 
-                initialSeconds={currentActivation.time_limit}
-                startTime={currentActivation.timer_started_at}
-                variant="small"
-                onComplete={() => setShowAnswers(true)}
-              />
+            {/* FIXED: Use our timer state instead of CountdownTimer component */}
+            {timeRemaining !== null && timeRemaining > 0 && (
+              <div className="px-4 py-2 bg-white/20 rounded-full text-white font-mono">
+                <Clock className="w-4 h-4 inline mr-2" />
+                {Math.floor(timeRemaining / 60)}:{(timeRemaining % 60).toString().padStart(2, '0')}
+              </div>
             )}
           </div>
         </div>
@@ -742,7 +836,10 @@ export default function Game() {
                         votes={pollVotes}
                         totalVotes={totalVotes}
                         displayType={currentActivation.poll_display_type || 'bar'}
+                        pollState={pollState}
+                        resultFormat={currentActivation.poll_result_format}
                         selectedAnswer={selectedAnswer}
+                        selectedOptionId={selectedOptionId}
                         getStorageUrl={getStorageUrl}
                         themeColors={roomTheme}
                       />
@@ -760,8 +857,8 @@ export default function Game() {
           </div>
         )}
         
-        {/* Point Animation */}
-        {showPointAnimation && (
+        {/* Point Animation - Only show when points are revealed */}
+        {showPointAnimation && showAnswers && (
           <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50">
             <PointAnimation 
               points={pointsEarned} 
