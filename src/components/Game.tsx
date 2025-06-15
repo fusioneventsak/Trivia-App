@@ -597,14 +597,29 @@ export default function Game() {
         setLoading(true);
         setShowNetworkStatus(false);
 
-        // Get room data with retry logic
-        const roomResponse = await retry(async () => {
-          return await supabase
-            .from('rooms')
-            .select('*')
-            .eq('room_code', roomId)
-            .single();
-        }, 3);
+       // CRITICAL FIX: Check if roomId is a UUID or a room code
+       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(roomId);
+       
+       let roomResponse;
+       if (isUuid) {
+         console.log(`[${debugId}] Detected UUID format, querying by ID`);
+         roomResponse = await retry(async () => {
+           return await supabase
+             .from('rooms')
+             .select('*')
+             .eq('id', roomId)
+             .single();
+         }, 3);
+       } else {
+         console.log(`[${debugId}] Detected room code format, querying by room_code`);
+         roomResponse = await retry(async () => {
+           return await supabase
+             .from('rooms')
+             .select('*')
+             .eq('room_code', roomId.toUpperCase())
+             .single();
+         }, 3);
+       }
 
         if (roomResponse.error) {
           if (isNetworkError(roomResponse.error)) {

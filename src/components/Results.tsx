@@ -175,9 +175,30 @@ export default function Results() {
           console.log(`[${debugIdRef.current}] Detected room code format, querying by room_code`);
           const response = await retry(async () => {
             return await supabase
+        // CRITICAL FIX: Check if code is a UUID or a room code
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(code || '');
+        
+        let roomData;
+        let roomError;
+        
+        if (isUuid) {
+          console.log(`[${debugIdRef.current}] Detected UUID format, querying by ID`);
+          const response = await retry(async () => {
+            return await supabase
               .from('rooms')
               .select('*')
-              .eq('room_code', code)
+              .eq('id', code)
+              .maybeSingle();
+          }, 3);
+          roomData = response.data;
+          roomError = response.error;
+        } else {
+          console.log(`[${debugIdRef.current}] Detected room code format, querying by room_code`);
+          const response = await retry(async () => {
+            return await supabase
+              .from('rooms')
+              .select('*')
+              .eq('room_code', code.toUpperCase())
               .maybeSingle();
           }, 3);
           roomData = response.data;

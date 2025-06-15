@@ -5,6 +5,15 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * Checks if a string is a valid UUID
+ * @param str String to check
+ * @returns True if the string is a valid UUID
+ */
+export function isUuid(str: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+}
+
 export function getStorageUrl(url: string | undefined): string {
   if (!url) return '';
   

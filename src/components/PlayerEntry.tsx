@@ -176,7 +176,7 @@ export default function PlayerEntry() {
       const { data, error } = await supabase
         .from('rooms')
         .select('*')
-        .eq('room_code', code)
+       .eq('room_code', code.toUpperCase())
         .eq('is_active', true)
         .single();
 
