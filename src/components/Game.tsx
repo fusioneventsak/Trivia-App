@@ -62,15 +62,15 @@ export default function Game() {
   const [showPointAnimation, setShowPointAnimation] = useState(false);
   const [playerScore, setPlayerScore] = useState<number>(0);
   const [responseStartTime, setResponseStartTime] = useState<number | null>(null);
-  const [showAnswers, setShowAnswers] = useState(true);
+  const [showAnswers, setShowAnswers] = useState(false); // Start with false - only show when timer expires
   const [showNetworkStatus, setShowNetworkStatus] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
   const [debugId] = useState(`game-${Math.random().toString(36).substring(2, 7)}`);
 
-  // Timer reference for cleanup
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  // Timer reference for cleanup - EXACTLY LIKE RESULTS COMPONENT
+  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Poll management - Now using the simplified polling version
+  // Poll management
   const {
     votesByText: pollVotes,
     totalVotes,
@@ -132,6 +132,33 @@ export default function Game() {
           }
         })
         .subscribe();
+
+      // Subscribe to activation updates for timer changes
+      const activationChannel = supabase
+        .channel(`activation_updates_${roomId}`)
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'activations',
+          filter: `room_id=eq.${roomId}`
+        }, async (payload: any) => {
+          if (currentActivation && payload.new.id === currentActivation.id) {
+            console.log('Current activation updated:', payload.new.id);
+            
+            // Update activation without resetting everything
+            setCurrentActivation(prev => ({
+              ...prev,
+              ...payload.new
+            }));
+            
+            // Update timer if timer_started_at changed
+            if (payload.new.timer_started_at !== payload.old?.timer_started_at && 
+                payload.new.time_limit && payload.new.timer_started_at) {
+              setupTimer(payload.new as Activation);
+            }
+          }
+        })
+        .subscribe();
         
       // Subscribe to player score updates
       const playerChannel = supabase
@@ -151,6 +178,7 @@ export default function Game() {
       
       return () => {
         gameSessionChannel.unsubscribe();
+        activationChannel.unsubscribe();
         playerChannel.unsubscribe();
       };
     };
@@ -160,8 +188,9 @@ export default function Game() {
     return () => {
       cleanup.then(fn => fn && fn());
       // Cleanup timer on unmount
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+        timerIntervalRef.current = null;
       }
     };
   }, [roomId, currentPlayerId, navigate]);
@@ -233,7 +262,7 @@ export default function Game() {
       setCurrentActivation(data);
       resetAnswerState();
       
-      // Setup timer if there's a time limit
+      // Setup timer using EXACT SAME LOGIC AS RESULTS COMPONENT
       setupTimer(data);
       
       // Start response timer for questions
@@ -255,21 +284,22 @@ export default function Game() {
     }
   };
 
-  // Setup timer function to properly handle countdown
+  // EXACT SAME TIMER LOGIC AS RESULTS COMPONENT
   const setupTimer = (activation: Activation) => {
+    console.log(`[${debugId}] Setting up timer for activation: ${activation.id}`);
     // Clear any existing timer
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
     }
     
     // Reset timer state
     setTimeRemaining(null);
-    setShowAnswers(false); // Hide answers initially
+    setShowAnswers(false); // Default to hiding answers
     
-    // If no time limit, show answers immediately
-    if (!activation.time_limit) {
-      setShowAnswers(activation.show_answers !== false);
+    // If no activation or no time limit, show answers and return
+    if (!activation || !activation.time_limit) {
+      setShowAnswers(activation?.show_answers !== false);
       return;
     }
     
@@ -281,37 +311,36 @@ export default function Game() {
       const totalTimeMs = activation.time_limit * 1000;
       
       console.log(`[${debugId}] Timer calculation: elapsed=${elapsedMs}ms, total=${totalTimeMs}ms`);
-      
       // If timer has already expired, show answers
       if (elapsedMs >= totalTimeMs) {
         setTimeRemaining(0);
-        setShowAnswers(true);
+        setShowAnswers(true); // Always show answers when timer expires
         return;
       }
       
-      // Calculate remaining time
+      // Otherwise, calculate remaining time and start countdown
       const remainingMs = totalTimeMs - elapsedMs;
-      const remainingSeconds = Math.ceil(remainingMs / 1000);
-      setTimeRemaining(remainingSeconds);
+      setTimeRemaining(Math.ceil(remainingMs / 1000));
+      setShowAnswers(false);
+      console.log(`[${debugId}] Starting timer with ${Math.ceil(remainingMs / 1000)} seconds remaining`);
       
-      // Start countdown
-      timerRef.current = setInterval(() => {
+      // Start countdown timer
+      timerIntervalRef.current = setInterval(() => {
         setTimeRemaining(prev => {
           if (prev === null || prev <= 1) {
-            if (timerRef.current) {
-              clearInterval(timerRef.current);
-              timerRef.current = null;
+            // Time's up - clear interval and always show answers
+            if (timerIntervalRef.current) {
+              clearInterval(timerIntervalRef.current);
+              timerIntervalRef.current = null;
             }
-            setShowAnswers(true);
+            
+            setShowAnswers(true); // Always show answers when timer expires
+            
             return 0;
           }
           return prev - 1;
         });
       }, 1000);
-    } else {
-      // Timer hasn't started yet, just set the initial time
-      setTimeRemaining(activation.time_limit);
-      setShowAnswers(false);
     }
   };
   
@@ -337,41 +366,34 @@ export default function Game() {
     const isAnswerCorrect = answer === currentActivation.correct_answer;
     setIsCorrect(isAnswerCorrect);
     
-    // Don't show result or award points until timer completes
+    // NEVER show result or award points until timer completes (showAnswers = true)
+    // Always update database score in background
+    if (isAnswerCorrect) {
+      const basePoints = 100;
+      const timeBonus = getTimeBonus(responseTime);
+      const totalPoints = calculatePoints(basePoints, timeBonus);
+      
+      // Store points for later display but don't show yet
+      setPointsEarned(totalPoints);
+      
+      // Update player score in database immediately
+      await updatePlayerScoreInDB(totalPoints, true, responseTime);
+    } else {
+      // Update stats for incorrect answer
+      await updatePlayerScoreInDB(0, false, responseTime);
+    }
+    
+    // Only show results if timer has already expired
     if (showAnswers) {
+      setShowResult(true);
       if (isAnswerCorrect) {
-        // Calculate points with time bonus
-        const basePoints = 100;
-        const timeBonus = getTimeBonus(responseTime);
-        const totalPoints = calculatePoints(basePoints, timeBonus);
-        
-        setPointsEarned(totalPoints);
         setShowPointAnimation(true);
-        
-        // Update player score
-        await updatePlayerScoreInDB(totalPoints, true, responseTime);
-        
         // Fire confetti
         confetti({
           particleCount: 100,
           spread: 70,
           origin: { y: 0.6 }
         });
-      } else {
-        // Update stats for incorrect answer
-        await updatePlayerScoreInDB(0, false, responseTime);
-      }
-      
-      setShowResult(true);
-    } else {
-      // Just update stats, don't show points until timer ends
-      if (isAnswerCorrect) {
-        const basePoints = 100;
-        const timeBonus = getTimeBonus(responseTime);
-        const totalPoints = calculatePoints(basePoints, timeBonus);
-        await updatePlayerScoreInDB(totalPoints, true, responseTime);
-      } else {
-        await updatePlayerScoreInDB(0, false, responseTime);
       }
     }
   };
@@ -390,41 +412,34 @@ export default function Game() {
     
     setIsCorrect(isAnswerCorrect);
     
-    // Don't show result or award points until timer completes
+    // NEVER show result or award points until timer completes (showAnswers = true)
+    // Always update database score in background
+    if (isAnswerCorrect) {
+      const basePoints = 150; // Text answers worth more
+      const timeBonus = getTimeBonus(responseTime);
+      const totalPoints = calculatePoints(basePoints, timeBonus);
+      
+      // Store points for later display but don't show yet
+      setPointsEarned(totalPoints);
+      
+      // Update player score in database immediately
+      await updatePlayerScoreInDB(totalPoints, true, responseTime);
+    } else {
+      // Update stats for incorrect answer
+      await updatePlayerScoreInDB(0, false, responseTime);
+    }
+    
+    // Only show results if timer has already expired
     if (showAnswers) {
+      setShowResult(true);
       if (isAnswerCorrect) {
-        // Calculate points with time bonus
-        const basePoints = 150; // Text answers worth more
-        const timeBonus = getTimeBonus(responseTime);
-        const totalPoints = calculatePoints(basePoints, timeBonus);
-        
-        setPointsEarned(totalPoints);
         setShowPointAnimation(true);
-        
-        // Update player score
-        await updatePlayerScoreInDB(totalPoints, true, responseTime);
-        
         // Fire confetti
         confetti({
           particleCount: 100,
           spread: 70,
           origin: { y: 0.6 }
         });
-      } else {
-        // Update stats for incorrect answer
-        await updatePlayerScoreInDB(0, false, responseTime);
-      }
-      
-      setShowResult(true);
-    } else {
-      // Just update stats, don't show points until timer ends
-      if (isAnswerCorrect) {
-        const basePoints = 150;
-        const timeBonus = getTimeBonus(responseTime);
-        const totalPoints = calculatePoints(basePoints, timeBonus);
-        await updatePlayerScoreInDB(totalPoints, true, responseTime);
-      } else {
-        await updatePlayerScoreInDB(0, false, responseTime);
       }
     }
   };
@@ -531,16 +546,11 @@ export default function Game() {
   // Watch for timer completion to show results and points
   useEffect(() => {
     if (showAnswers && hasAnswered && !showResult && (currentActivation?.type === 'multiple_choice' || currentActivation?.type === 'text_answer')) {
-      // Timer just completed, now show results and award points if correct
+      // Timer just completed, now show results and points if correct
+      console.log(`[${debugId}] Timer completed - showing results and points`);
       setShowResult(true);
       
-      if (isCorrect) {
-        const responseTime = responseStartTime ? Date.now() - responseStartTime : 0;
-        const basePoints = currentActivation.type === 'text_answer' ? 150 : 100;
-        const timeBonus = getTimeBonus(responseTime);
-        const totalPoints = calculatePoints(basePoints, timeBonus);
-        
-        setPointsEarned(totalPoints);
+      if (isCorrect && pointsEarned > 0) {
         setShowPointAnimation(true);
         
         // Fire confetti
@@ -551,7 +561,7 @@ export default function Game() {
         });
       }
     }
-  }, [showAnswers, hasAnswered, showResult, isCorrect, currentActivation, responseStartTime]);
+  }, [showAnswers, hasAnswered, showResult, isCorrect, pointsEarned, currentActivation, debugId]);
   
   const renderMediaContent = () => {
     if (!currentActivation?.media_url || currentActivation.media_type === 'none') return null;
@@ -655,12 +665,25 @@ export default function Game() {
               showIcon={true}
             />
             
-            {/* FIXED: Use our timer state instead of CountdownTimer component */}
+            {/* SYNCHRONIZED TIMER DISPLAY */}
             {timeRemaining !== null && timeRemaining > 0 && (
               <div className="px-4 py-2 bg-white/20 rounded-full text-white font-mono">
                 <Clock className="w-4 h-4 inline mr-2" />
                 {Math.floor(timeRemaining / 60)}:{(timeRemaining % 60).toString().padStart(2, '0')}
               </div>
+            )}
+            
+            {/* TIMER FOR POLLS */}
+            {currentActivation?.type === 'poll' && currentActivation.time_limit && currentActivation.timer_started_at && (
+              <CountdownTimer 
+                initialSeconds={currentActivation.time_limit}
+                startTime={currentActivation.timer_started_at}
+                variant="small"
+                onComplete={() => {
+                  // Timer completed for poll, but polls don't have showAnswers logic
+                  console.log(`[${debugId}] Poll timer completed`);
+                }}
+              />
             )}
           </div>
         </div>
@@ -857,8 +880,8 @@ export default function Game() {
           </div>
         )}
         
-        {/* Point Animation - Only show when points are revealed */}
-        {showPointAnimation && showAnswers && (
+        {/* Point Animation - Only show when timer has completed and results are shown */}
+        {showPointAnimation && showAnswers && showResult && (
           <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50">
             <PointAnimation 
               points={pointsEarned} 
