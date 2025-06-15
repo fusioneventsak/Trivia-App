@@ -89,28 +89,37 @@ export default function Results() {
       clearInterval(timerIntervalRef.current);
     }
 
-    if (currentActivation?.time_limit && currentActivation?.timer_started_at) {
+    // Reset timer state
+    setTimeRemaining(null);
+    
+    // Only show answers if host has explicitly set show_answers = true
+    setShowAnswers(currentActivation?.show_answers === true);
+
+    // Only setup timer if activation has time_limit and timer has started
+    if (currentActivation?.time_limit && currentActivation?.timer_started_at && currentActivation?.show_answers !== true) {
       const startTime = new Date(currentActivation.timer_started_at).getTime();
       const totalTime = currentActivation.time_limit * 1000;
 
       const updateTimer = () => {
         const elapsed = Date.now() - startTime;
         const remaining = Math.max(0, totalTime - elapsed);
-        setTimeRemaining(Math.floor(remaining / 1000));
+        const remainingSeconds = Math.floor(remaining / 1000);
+        
+        setTimeRemaining(remainingSeconds);
 
         if (remaining <= 0) {
-          setShowAnswers(true);
+          // Timer expired but wait for host to reveal answers
           if (timerIntervalRef.current) {
             clearInterval(timerIntervalRef.current);
           }
         }
       };
 
-      updateTimer();
+      updateTimer(); // Initial update
       timerIntervalRef.current = setInterval(updateTimer, 100);
-    } else {
-      setTimeRemaining(null);
-      setShowAnswers(currentActivation?.show_answers !== false);
+    } else if (currentActivation?.time_limit && !currentActivation?.timer_started_at) {
+      // Timer hasn't started yet - show the total time
+      setTimeRemaining(currentActivation.time_limit);
     }
 
     return () => {
@@ -118,7 +127,7 @@ export default function Results() {
         clearInterval(timerIntervalRef.current);
       }
     };
-  }, [currentActivation]);
+  }, [currentActivation?.time_limit, currentActivation?.timer_started_at, currentActivation?.show_answers]);
 
   // Fetch room data
   const fetchRoom = async () => {
@@ -483,16 +492,25 @@ export default function Results() {
           {currentActivation ? (
             // Active template display
             <div className="bg-white/10 backdrop-blur-sm rounded-lg p-8">
-              {/* Timer display */}
-              {timeRemaining !== null && timeRemaining > 0 && (
+              {/* Timer display - Enhanced with NaN protection */}
+              {currentActivation.time_limit && timeRemaining !== null && !isNaN(timeRemaining) && (
                 <div className="flex justify-center mb-6">
                   <div className="bg-white/20 px-6 py-3 rounded-lg">
-                    <CountdownTimer 
-                      duration={timeRemaining} 
-                      onComplete={() => setShowAnswers(true)}
-                      size="lg"
-                      showLabel={false}
-                    />
+                    {currentActivation.timer_started_at && !currentActivation.show_answers ? (
+                      <CountdownTimer 
+                        duration={timeRemaining} 
+                        onComplete={() => {
+                          // Don't automatically show answers - wait for host
+                          console.log('Timer completed - waiting for host to reveal answers');
+                        }}
+                        size="lg"
+                        showLabel={false}
+                      />
+                    ) : (
+                      <div className="text-white text-xl font-mono">
+                        {currentActivation.show_answers ? 'Time\'s Up!' : `${currentActivation.time_limit}s`}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -527,7 +545,7 @@ export default function Results() {
                   {renderQuestionMedia()}
 
                   {/* Multiple choice options */}
-                  {currentActivation.type === 'multiple_choice' && showAnswers && (
+                  {currentActivation.type === 'multiple_choice' && currentActivation.show_answers === true && (
                     <div className="max-w-3xl mx-auto space-y-4">
                       {currentActivation.options?.map((option, index) => (
                         <div 
@@ -557,7 +575,7 @@ export default function Results() {
                   )}
 
                   {/* Text answer */}
-                  {currentActivation.type === 'text_answer' && showAnswers && currentActivation.exact_answer && (
+                  {currentActivation.type === 'text_answer' && currentActivation.show_answers === true && currentActivation.exact_answer && (
                     <div className="max-w-3xl mx-auto">
                       <div className="p-6 rounded-lg bg-green-500/20 border-2 border-green-400 text-white">
                         <span className="text-xl font-medium">Correct Answer: {currentActivation.exact_answer}</span>
@@ -583,11 +601,15 @@ export default function Results() {
                     </div>
                   )}
 
-                  {/* Waiting for answers */}
-                  {!showAnswers && currentActivation.type !== 'poll' && (
+                  {/* Waiting for answers - only show if timer is running but answers not revealed */}
+                  {currentActivation.show_answers === false && currentActivation.type !== 'poll' && (
                     <div className="text-center py-12">
                       <Clock className="w-16 h-16 text-white/50 mx-auto mb-4" />
-                      <p className="text-white/70 text-xl">Waiting for answers to be revealed...</p>
+                      <p className="text-white/70 text-xl">
+                        {currentActivation.timer_started_at 
+                          ? 'Waiting for host to reveal answers...' 
+                          : 'Waiting for timer to start...'}
+                      </p>
                     </div>
                   )}
                 </>
