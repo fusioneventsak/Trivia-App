@@ -602,7 +602,7 @@ export default function Game() {
           return await supabase
             .from('rooms')
             .select('*')
-            .eq('code', roomId)
+            .eq('room_code', roomId)
             .single();
         }, 3);
 
