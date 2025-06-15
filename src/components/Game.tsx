@@ -1,4 +1,4 @@
-// Complete Fixed Game.tsx with all missing pieces
+// src/components/Game.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
@@ -122,33 +122,42 @@ export default function Game() {
   // CRITICAL FIX: Enhanced result revelation logic
   const canRevealResults = () => {
     // If there's no timer configured, can show immediately
-    if (!timerState.isActive && !timerState.startedAt) {
+    if (!currentActivation?.time_limit) {
       console.log(`[${debugId}] 🟢 No timer configured - can reveal results immediately`);
       return true;
     }
     
     // If timer has explicitly expired, can show
-    if (timerState.hasExpired) {
+    if (timerState.hasExpired || timerExpired) {
       console.log(`[${debugId}] 🟢 Timer expired - can reveal results now`);
       return true;
     }
     
+    // If timer hasn't started yet, can show
+    if (!timerState.startedAt && !currentActivation?.timer_started_at) {
+      console.log(`[${debugId}] 🟢 Timer not started - can reveal results immediately`);
+      return true;
+    }
+    
     // Double-check timer expiration using server time
-    if (timerState.startedAt && timerState.totalTime) {
-      const startTime = new Date(timerState.startedAt).getTime();
+    if (currentActivation?.timer_started_at && currentActivation?.time_limit) {
+      const startTime = new Date(currentActivation.timer_started_at).getTime();
       const currentTime = new Date().getTime();
       const elapsedMs = currentTime - startTime;
-      const totalTimeMs = timerState.totalTime * 1000;
+      const totalTimeMs = currentActivation.time_limit * 1000;
       
       if (elapsedMs >= totalTimeMs) {
         console.log(`[${debugId}] 🟢 Timer should have expired (server time check) - can reveal results`);
+        // Update state to reflect expiration
+        setTimerState(prev => ({ ...prev, hasExpired: true }));
+        setTimerExpired(true);
         return true;
       }
     }
     
-    // Fallback to legacy timer state for compatibility
-    if (!hasActiveTimer || timerExpired) {
-      console.log(`[${debugId}] 🟢 Legacy timer check - can reveal results`);
+    // Check if time remaining is 0
+    if (timerState.timeRemaining === 0 || timeRemaining === 0) {
+      console.log(`[${debugId}] 🟢 Time remaining is 0 - can reveal results`);
       return true;
     }
     
@@ -303,11 +312,16 @@ export default function Game() {
               timerIntervalRef.current = null;
             }
             
-            // Update legacy states
+            // Update legacy states IMMEDIATELY
             setTimeRemaining(0);
             setHasActiveTimer(false);
             setTimerExpired(true);
             setShowAnswers(true);
+            
+            // Trigger result reveal for answered questions
+            if (hasAnswered) {
+              setShowResult(true);
+            }
             
             return {
               ...prevState,
@@ -474,15 +488,15 @@ export default function Game() {
       console.log(`[${debugId}] ✅ Poll vote submitted - no points awarded`);
     } else {
       setError(result.error || 'Failed to submit vote. Please try again.');
-      setTimeout(() => setError(null), 3000);
     }
   };
 
+  // Update player score in database
   const updatePlayerScoreInDB = async (points: number, isCorrect: boolean, responseTimeMs: number) => {
-    if (!currentPlayerId) return;
-    console.log(`[${debugId}] 💾 Updating database: +${points} points, correct: ${isCorrect}`);
+    if (!currentPlayerId || points <= 0) return;
     
     try {
+      // Fetch current player data
       const { data: playerData, error: fetchError } = await supabase
         .from('players')
         .select('score, stats')
@@ -491,6 +505,7 @@ export default function Game() {
         
       if (fetchError) throw fetchError;
       
+      // Update stats
       const currentStats = playerData.stats || {
         totalPoints: 0,
         correctAnswers: 0,
@@ -499,7 +514,7 @@ export default function Game() {
       };
       
       const newTotalAnswers = currentStats.totalAnswers + 1;
-      const newAverageResponseTime = currentStats.totalAnswers === 0
+      const newAverageResponseTime = currentStats.averageResponseTimeMs === 0
         ? responseTimeMs
         : Math.round((currentStats.averageResponseTimeMs * currentStats.totalAnswers + responseTimeMs) / newTotalAnswers);
       
@@ -570,337 +585,270 @@ export default function Game() {
     }
   }, [timerState.hasExpired, timerExpired, hasAnswered, showResult, isCorrect, pointsEarned, currentActivation, debugId, hasPendingReward, pendingPoints, pendingCorrect, pendingResponseTime]);
 
-  // Original fetch and subscription logic (keeping existing logic)
+  // Setup room and initial data
   useEffect(() => {
-    if (!currentPlayerId) {
-      navigate('/join', { 
-        state: { 
-          roomId, 
-          message: 'Please join the room first'
-        }
-      });
-      return;
-    }
-    
-    fetchRoomAndActivation();
-    
-    // Set up subscriptions
-    const setupSubscriptions = async () => {
-      if (!roomId) return;
-      
-      // Subscribe to game session changes
-      const gameSessionChannel = supabase
-        .channel(`game_session_${roomId}`)
-        .on('postgres_changes', {
-          event: '*',
-          schema: 'public',
-          table: 'game_sessions',
-          filter: `room_id=eq.${roomId}`
-        }, async (payload: any) => {
-          console.log('Game session change:', payload);
-          if (payload.new?.current_activation) {
-            await fetchCurrentActivation(payload.new.current_activation);
-          } else {
-            setCurrentActivation(null);
-            resetAnswerState();
-          }
-        })
-        .subscribe();
+    const setupRoom = async () => {
+      if (!roomId) {
+        navigate('/');
+        return;
+      }
 
-      // Subscribe to activation updates for timer changes
-      const activationChannel = supabase
-        .channel(`activation_updates_${roomId}`)
-        .on('postgres_changes', {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'activations',
-          filter: `room_id=eq.${roomId}`
-        }, async (payload: any) => {
-          if (currentActivation && payload.new.id === currentActivation.id) {
-            console.log('Current activation updated:', payload.new.id);
-            
-            // Update activation without resetting everything
-            setCurrentActivation(prev => ({
-              ...prev,
-              ...payload.new
-            }));
-            
-            // Update timer if timer_started_at changed
-            if (payload.new.timer_started_at !== payload.old?.timer_started_at && 
-                payload.new.time_limit && payload.new.timer_started_at) {
-              setupTimer(payload.new as Activation);
-            }
+      try {
+        setLoading(true);
+        setShowNetworkStatus(false);
+
+        // Get room data with retry logic
+        const roomResponse = await retry(async () => {
+          return await supabase
+            .from('rooms')
+            .select('*')
+            .eq('code', roomId)
+            .single();
+        }, 3);
+
+        if (roomResponse.error) {
+          if (isNetworkError(roomResponse.error)) {
+            setShowNetworkStatus(true);
+            setError('Connection issue. Please check your internet and try again.');
+          } else if (roomResponse.error.code === 'PGRST116') {
+            setError('Room not found. Please check the room code.');
+            setTimeout(() => navigate('/'), 2000);
+          } else {
+            setError(getFriendlyErrorMessage(roomResponse.error));
           }
-        })
-        .subscribe();
-        
-      // Subscribe to player score updates
-      const playerChannel = supabase
-        .channel(`player_${currentPlayerId}`)
-        .on('postgres_changes', {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'players',
-          filter: `id=eq.${currentPlayerId}`
-        }, (payload: any) => {
-          if (payload.new?.score !== undefined) {
-            setPlayerScore(payload.new.score);
-            updatePlayerScore(currentPlayerId, payload.new.score);
+          return;
+        }
+
+        setRoom(roomResponse.data);
+
+        // Check if player is already in this room
+        const existingPlayerId = localStorage.getItem('currentPlayerId');
+        if (existingPlayerId) {
+          const { data: existingPlayer } = await supabase
+            .from('players')
+            .select('*')
+            .eq('id', existingPlayerId)
+            .eq('room_id', roomResponse.data.id)
+            .maybeSingle();
+
+          if (existingPlayer) {
+            setCurrentPlayerId(existingPlayerId);
+            addPlayer(existingPlayer);
+            setPlayerScore(existingPlayer.score || 0);
+            console.log(`[${debugId}] Found existing player:`, existingPlayer.name);
           }
-        })
-        .subscribe();
-      
-      return () => {
-        gameSessionChannel.unsubscribe();
-        activationChannel.unsubscribe();
-        playerChannel.unsubscribe();
-      };
-    };
-    
-    const cleanup = setupSubscriptions();
-    
-    return () => {
-      cleanup.then(fn => fn && fn());
-      // Cleanup timer on unmount
-      if (timerIntervalRef.current) {
-        clearInterval(timerIntervalRef.current);
-        timerIntervalRef.current = null;
+        }
+
+        // Get current game session
+        const sessionResponse = await retry(async () => {
+          return await supabase
+            .from('game_sessions')
+            .select('*, activations(*)')
+            .eq('room_id', roomResponse.data.id)
+            .eq('is_live', true)
+            .maybeSingle();
+        }, 3);
+
+        if (sessionResponse.data?.activations) {
+          handleActivationChange(sessionResponse.data.activations);
+        }
+
+        setLoading(false);
+      } catch (err: any) {
+        console.error('Error setting up room:', err);
+        setError(getFriendlyErrorMessage(err));
+        setLoading(false);
       }
     };
-  }, [roomId, currentPlayerId, navigate]);
+
+    setupRoom();
+  }, [roomId, navigate, addPlayer, setCurrentPlayerId, debugId]);
 
   // Handle activation changes
-  useEffect(() => {
-    if (currentActivation && currentActivation.id !== lastActivationIdRef.current) {
-      console.log(`[${debugId}] 🔄 New activation detected:`, currentActivation.id);
-      lastActivationIdRef.current = currentActivation.id;
-      
-      // Reset answer state for new activation
-      resetAnswerState();
-      
-      // Setup timer for new activation
-      setupTimer(currentActivation);
-      
-      // Start response timer
-      setResponseStartTime(Date.now());
-    }
-  }, [currentActivation, debugId]);
-
-  const fetchRoomAndActivation = async () => {
-    try {
-      console.log(`[${debugId}] Fetching room and activation data for room: ${roomId}`);
-      setLoading(true);
-      
-      // Fetch room
-      const { data: roomData, error: roomError } = await supabase
-        .from('rooms')
-        .select('*')
-        .eq('id', roomId)
-        .single();
-        
-      if (roomError) throw roomError;
-      console.log(`[${debugId}] Room data fetched:`, roomData.name);
-      setRoom(roomData);
-      
-      // Fetch current player data
-      const { data: playerData, error: playerError } = await supabase
-        .from('players')
-        .select('*')
-        .eq('id', currentPlayerId)
-        .single();
-        
-      if (playerError) throw playerError;
-      console.log(`[${debugId}] Player data fetched:`, playerData.name);
-      
-      setPlayerScore(playerData.score || 0);
-      addPlayer(playerData);
-      
-      // Fetch current activation
-      const { data: sessionData } = await supabase
-        .from('game_sessions')
-        .select('current_activation')
-        .eq('room_id', roomId)
-        .single();
-        
-      if (sessionData?.current_activation) {
-        console.log(`[${debugId}] Current activation found:`, sessionData.current_activation);
-        await fetchCurrentActivation(sessionData.current_activation);
-      }
-      
-      setLoading(false);
-    } catch (err: any) {
-      console.error('Error fetching data:', err);
-      setError(err.message || 'Failed to load game data');
-      setLoading(false);
-    }
-  };
-  
-  const fetchCurrentActivation = async (activationId: string) => {
-    try {
-      console.log(`[${debugId}] Fetching activation: ${activationId}`);
-      // Use retry function for better error handling
-      const { data, error } = await retry(async () => {
-        return await supabase
-          .from('activations')
-          .select('*')
-          .eq('id', activationId)
-          .single();
-      }, 3, 500);
-        
-      if (error) throw error;
-      
-      console.log(`[${debugId}] Activation fetched:`, {
-        type: data.type,
-        time_limit: data.time_limit,
-        timer_started_at: data.timer_started_at,
-        show_answers: data.show_answers
-      });
-      
-      setCurrentActivation(data);
-      resetAnswerState();
-      
-      // Setup timer
-      setupTimer(data);
-      
-      // Start response timer for questions
-      if ((data.type === 'multiple_choice' || data.type === 'text_answer') && !hasAnswered) {
-        setResponseStartTime(Date.now());
-      }
-      
-    } catch (err: any) {
-      console.log(`[${debugId}] Error fetching activation:`, err.message || err);
-      console.error('Error fetching activation:', err.message || err);
-      
-      // Check if it's a network error
-      if (isNetworkError(err)) {
-        setShowNetworkStatus(true);
-        setError('Network connection issue. Please check your internet connection.');
-      } else {
-        setError(getFriendlyErrorMessage(err));
-      }
-    }
-  };
-
-  const resetAnswerState = () => {
-    setSelectedAnswer('');
-    setSelectedOptionId('');
-    setTextAnswer('');
-    setHasAnswered(false);
-    setShowResult(false);
-    setIsCorrect(false);
-    setResponseStartTime(null);
-    setPointsEarned(0);
-    setShowPointAnimation(false);
-  };
-  
-  const renderMediaContent = () => {
-    if (!currentActivation?.media_url || currentActivation.media_type === 'none') return null;
+  const handleActivationChange = (activation: Activation | null) => {
+    console.log(`[${debugId}] 📋 Activation change:`, activation?.id);
     
-    return (
-      <div className="flex justify-center items-center mb-6">
-        {currentActivation.media_type === 'youtube' ? (
-          <div className="w-full max-w-lg rounded-lg shadow-md overflow-hidden">
-            <div className="aspect-video">
-              <MediaDisplay
-                url={currentActivation.media_url}
-                type={currentActivation.media_type}
-                alt="Question media"
-                className="w-full h-full"
-                fallbackText="Video not available"
-              />
-            </div>
-          </div>
-        ) : (
-          <MediaDisplay
-            url={currentActivation.media_url}
-            type={currentActivation.media_type}
-            alt="Question media"
-            className="max-h-64 rounded-lg shadow-md"
-            fallbackText="Image not available"
-          />
-        )}
-      </div>
-    );
+    // Only reset if it's a different activation
+    if (activation?.id !== lastActivationIdRef.current) {
+      setCurrentActivation(activation);
+      lastActivationIdRef.current = activation?.id || null;
+      
+      // Reset states for new activation
+      if (activation) {
+        setSelectedAnswer('');
+        setSelectedOptionId('');
+        setTextAnswer('');
+        setHasAnswered(false);
+        setShowResult(false);
+        setIsCorrect(false);
+        setPointsEarned(0);
+        setShowPointAnimation(false);
+        setResponseStartTime(Date.now());
+        
+        // Setup timer for new activation
+        setupTimer(activation);
+      }
+    }
   };
-  
+
+  // Set up real-time subscriptions
+  useEffect(() => {
+    if (!room?.id) return;
+
+    // Subscribe to game session changes
+    const gameSessionChannel = supabase
+      .channel(`game_session_${room.id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'game_sessions',
+        filter: `room_id=eq.${room.id}`
+      }, async (payload: any) => {
+        console.log(`[${debugId}] Game session update:`, payload);
+        
+        if (payload.new?.current_activation !== payload.old?.current_activation) {
+          if (payload.new?.current_activation) {
+            // Fetch the new activation
+            const { data: activation } = await supabase
+              .from('activations')
+              .select('*')
+              .eq('id', payload.new.current_activation)
+              .single();
+              
+            if (activation) {
+              handleActivationChange(activation);
+            }
+          } else {
+            handleActivationChange(null);
+          }
+        }
+      })
+      .subscribe();
+
+    // Subscribe to activation updates (for timer changes)
+    const activationChannel = currentActivation?.id ? supabase
+      .channel(`activation_${currentActivation.id}`)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'activations',
+        filter: `id=eq.${currentActivation.id}`
+      }, (payload: any) => {
+        console.log(`[${debugId}] Activation update:`, payload);
+        
+        if (payload.new) {
+          // Update timer if it just started
+          if (!currentActivation.timer_started_at && payload.new.timer_started_at) {
+            console.log(`[${debugId}] Timer just started!`);
+            setupTimer(payload.new);
+          }
+          
+          // Update poll state if changed
+          if (payload.new.poll_state !== currentActivation.poll_state) {
+            setCurrentActivation(prev => prev ? { ...prev, poll_state: payload.new.poll_state } : null);
+          }
+        }
+      })
+      .subscribe() : null;
+
+    return () => {
+      gameSessionChannel.unsubscribe();
+      activationChannel?.unsubscribe();
+    };
+  }, [room?.id, currentActivation?.id, debugId]);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+      }
+    };
+  }, []);
+
+  // Compute display values
+  const currentTimeRemaining = timerState.timeRemaining ?? timeRemaining;
+  const shouldShowTimer = (timerState.isActive || hasActiveTimer) && 
+                        currentTimeRemaining !== null && 
+                        currentTimeRemaining > 0 &&
+                        (currentActivation?.type === 'multiple_choice' || currentActivation?.type === 'text_answer');
+
+  // Get room theme
+  const roomTheme = room?.theme_colors || theme.colors;
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-theme-gradient">
-        <div className="flex flex-col items-center">
-          <Loader2 className="w-12 h-12 text-white animate-spin mb-4" />
-          <p className="text-white text-xl">Loading game...</p>
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: roomTheme.primary }}>
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 animate-spin text-white mb-4 mx-auto" />
+          <p className="text-white text-lg">Loading game...</p>
         </div>
       </div>
     );
   }
-  
+
   if (error) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-theme-gradient p-4">
-        <div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full text-center">
-          <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
-          <h1 className="text-2xl font-bold text-gray-800 mb-4">Error</h1>
-          <p className="text-gray-600 mb-6">{error}</p>
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: roomTheme.primary }}>
+        <div className="bg-white/10 backdrop-blur-sm rounded-lg shadow-lg p-8 max-w-md w-full mx-4">
+          <AlertCircle className="w-12 h-12 text-red-400 mb-4 mx-auto" />
+          <h2 className="text-2xl font-bold text-white mb-2">Error</h2>
+          <p className="text-white/80">{error}</p>
           <button
-            onClick={() => navigate('/join')}
-            className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+            onClick={() => navigate('/')}
+            className="mt-4 w-full px-4 py-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition-colors"
           >
-            Back to Join
+            Back to Home
           </button>
         </div>
       </div>
     );
   }
-  
-  const roomTheme = room?.theme || theme;
-  
-  // CRITICAL FIX: Enhanced timer visibility logic using both new and legacy states
-  const shouldShowTimer = (timerState.isActive || hasActiveTimer) && 
-                         (timerState.timeRemaining !== null || timeRemaining !== null) && 
-                         (timerState.timeRemaining! >= 0 || timeRemaining! >= 0);
-  
-  // Use the most current time remaining value
-  const currentTimeRemaining = timerState.timeRemaining !== null ? timerState.timeRemaining : timeRemaining;
-  
+
+  if (!currentPlayerId) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: roomTheme.primary }}>
+        <div className="bg-white/10 backdrop-blur-sm rounded-lg shadow-lg p-8 max-w-md w-full mx-4">
+          <Trophy className="w-12 h-12 text-yellow-400 mb-4 mx-auto" />
+          <h2 className="text-2xl font-bold text-white mb-4">Join the Game!</h2>
+          <p className="text-white/80 mb-4">Please enter your name to join this room.</p>
+          <button
+            onClick={() => navigate(`/join/${roomId}`)}
+            className="w-full px-4 py-3 bg-white text-gray-900 rounded-lg hover:bg-gray-100 transition-colors flex items-center justify-center gap-2"
+          >
+            <Users className="w-5 h-5" />
+            Join Room
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div 
-      className="min-h-screen p-4 relative"
+      className="min-h-screen flex flex-col overflow-x-hidden"
       style={{ 
-        background: `linear-gradient(to bottom right, ${roomTheme.primary_color}, ${roomTheme.secondary_color})` 
+        backgroundColor: roomTheme.primary,
+        background: `linear-gradient(135deg, ${roomTheme.primary} 0%, ${roomTheme.secondary} 100%)`
       }}
     >
-      {/* Network status indicator */}
-      {showNetworkStatus && (
-        <div className="fixed top-0 left-0 right-0 z-50 p-2">
-          <NetworkStatus 
-            onRetry={() => {
-              setShowNetworkStatus(false);
-              fetchRoomAndActivation();
-            }}
-          />
-        </div>
-      )}
+      {showNetworkStatus && <NetworkStatus />}
       
-      {/* CRITICAL FIX: Enhanced mobile timer with maximum visibility */}
+      {/* MOBILE TIMER - CRITICAL FIX: Show at top on mobile */}
       {shouldShowTimer && isMobile && currentTimeRemaining !== null && (
-        <div className="fixed top-4 left-4 right-4 z-[9999] flex justify-center pointer-events-none">
-          <div className="bg-red-600 text-white px-6 py-4 rounded-xl shadow-2xl border-4 border-yellow-400 animate-pulse pointer-events-auto">
-            <div className="flex items-center justify-center text-2xl font-bold">
-              <Clock className="w-8 h-8 mr-3 text-yellow-300 flex-shrink-0" />
-              <span className="text-3xl tabular-nums font-mono">
-                {Math.floor(currentTimeRemaining / 60)}:{(currentTimeRemaining % 60).toString().padStart(2, '0')}
-              </span>
-            </div>
-            <div className="text-center text-yellow-200 text-sm mt-1 font-medium">
-              Time Remaining
-            </div>
+        <div className="fixed top-0 left-0 right-0 z-50 bg-red-500/90 backdrop-blur-sm text-white p-3 shadow-lg">
+          <div className="flex items-center justify-center">
+            <Clock className="w-5 h-5 mr-2" />
+            <span className="font-mono font-bold text-lg tabular-nums">
+              {Math.floor(currentTimeRemaining / 60)}:{(currentTimeRemaining % 60).toString().padStart(2, '0')}
+            </span>
           </div>
         </div>
       )}
       
-      <div className="max-w-4xl mx-auto">
-        {/* Header - Add top margin on mobile when timer is showing */}
-        <div className={`flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-4 ${shouldShowTimer && isMobile ? 'mt-24' : ''}`}>
+      <div className={`flex-1 p-4 max-w-4xl mx-auto w-full ${shouldShowTimer && isMobile ? 'mt-16' : ''}`}>
+        {/* Header */}
+        <div className={`mb-6 flex items-center justify-between ${shouldShowTimer && isMobile ? 'mt-2' : 'mt-4'}`}>
           <div className="flex items-center">
             {room?.logo_url && (
               <img 
@@ -963,174 +911,173 @@ export default function Game() {
             }
           >
             <div className="bg-white/10 backdrop-blur-sm rounded-lg shadow-lg p-4 sm:p-6">
-            {currentActivation.type === 'leaderboard' ? (
-              <LeaderboardDisplay 
-                roomId={roomId!}
-                maxPlayers={20}
-                autoRefresh={true}
-                refreshInterval={5000}
-                showStats={true}
-              />
-            ) : (
-              <>
-                <h2 className="text-xl sm:text-2xl font-semibold text-white mb-6 text-center">
-                  {currentActivation.question}
-                </h2>
-                
-                {renderMediaContent()}
-                
-                {/* Multiple Choice */}
-                {currentActivation.type === 'multiple_choice' && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                    {currentActivation.options?.map((option, index) => {
-                      const isSelected = option.text === selectedAnswer;
-                      const isCorrectAnswer = option.text === currentActivation.correct_answer;
-                      // BULLETPROOF: Only show correct/incorrect if canRevealResults() returns true
-                      const showCorrect = hasAnswered && canRevealResults() && isCorrectAnswer;
-                      const showIncorrect = hasAnswered && canRevealResults() && isSelected && !isCorrectAnswer;
-                      
-                      return (
+              {currentActivation.type === 'leaderboard' ? (
+                <LeaderboardDisplay 
+                  roomId={roomId!}
+                  currentPlayerId={currentPlayerId}
+                  playerScore={playerScore}
+                />
+              ) : (
+                <>
+                  {/* Question */}
+                  <div className="mb-6">
+                    <h2 className="text-2xl sm:text-3xl font-bold text-white mb-4">{currentActivation.question}</h2>
+                    {currentActivation.media_url && (
+                      <MediaDisplay
+                        mediaType={currentActivation.media_type}
+                        mediaUrl={getStorageUrl(currentActivation.media_url)}
+                        className="mb-4"
+                      />
+                    )}
+                  </div>
+
+                  {/* Answer Status */}
+                  {hasAnswered && showResult && canRevealResults() && (currentActivation.type === 'multiple_choice' || currentActivation.type === 'text_answer') && (
+                    <div className={`mb-6 p-4 rounded-lg flex items-center ${
+                      isCorrect ? 'bg-green-500/20 border border-green-400/50' : 'bg-red-500/20 border border-red-400/50'
+                    }`}>
+                      {isCorrect ? (
+                        <>
+                          <CheckCircle className="w-6 h-6 text-green-400 mr-3" />
+                          <div className="flex-1">
+                            <p className="text-green-400 font-semibold">Correct!</p>
+                            {pointsEarned > 0 && (
+                              <p className="text-green-300 text-sm">+{pointsEarned} points</p>
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <XCircle className="w-6 h-6 text-red-400 mr-3" />
+                          <div className="flex-1">
+                            <p className="text-red-400 font-semibold">Incorrect</p>
+                            {currentActivation.type === 'text_answer' && currentActivation.exact_answer && showAnswers && (
+                              <p className="text-red-300 text-sm">
+                                Correct answer: {currentActivation.exact_answer}
+                              </p>
+                            )}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Answer Options */}
+                  {currentActivation.type === 'multiple_choice' && (
+                    <div className="space-y-3">
+                      {currentActivation.options?.map((option, index) => (
                         <button
                           key={index}
                           onClick={() => handleMultipleChoiceAnswer(option.text, option.id)}
-                          disabled={hasAnswered}
-                          className={`p-3 sm:p-4 rounded-lg transition transform hover:scale-105 ${
+                          disabled={hasAnswered || pollState === 'closed'}
+                          className={`w-full p-4 rounded-lg text-left transition-all ${
                             hasAnswered
-                              ? showCorrect
-                                ? 'bg-green-400/30 ring-2 ring-green-400'
-                                : showIncorrect
-                                  ? 'bg-red-400/30 ring-2 ring-red-400'
-                                  : isSelected
-                                    ? 'bg-blue-400/30 ring-2 ring-blue-400'
-                                    : 'bg-white/20 opacity-50'
-                              : 'bg-white/20 hover:bg-white/30 cursor-pointer'
+                              ? selectedAnswer === option.text
+                                ? showResult && canRevealResults()
+                                  ? isCorrect
+                                    ? 'bg-green-500/30 border-2 border-green-400'
+                                    : 'bg-red-500/30 border-2 border-red-400'
+                                  : 'bg-white/20 border-2 border-white/40'
+                                : showResult && showAnswers && canRevealResults() && option.text === currentActivation.correct_answer
+                                  ? 'bg-green-500/20 border-2 border-green-400/50'
+                                  : 'bg-white/10 opacity-50'
+                              : 'bg-white/10 hover:bg-white/20 cursor-pointer'
                           }`}
                         >
                           <div className="flex items-center gap-3">
-                            {option.media_type !== 'none' && option.media_url && (
-                              <MediaDisplay
-                                url={option.media_url}
-                                type={option.media_type}
-                                alt={option.text}
-                                className="w-10 h-10 sm:w-12 sm:h-12 rounded-full object-cover flex-shrink-0"
-                                fallbackText="!"
+                            {option.media_url && (
+                              <img 
+                                src={getStorageUrl(option.media_url)}
+                                alt=""
+                                className="w-12 h-12 object-cover rounded"
+                                onError={(e) => {
+                                  e.currentTarget.style.display = 'none';
+                                }}
                               />
                             )}
-                            <span className="text-white font-medium text-base sm:text-lg text-left">{option.text}</span>
+                            <span className="text-white font-medium text-base sm:text-lg">{option.text}</span>
                           </div>
-                          
-                          {showCorrect && (
-                            <CheckCircle className="w-5 h-5 sm:w-6 sm:h-6 text-green-400 mt-2" />
-                          )}
-                          {showIncorrect && (
-                            <XCircle className="w-5 h-5 sm:w-6 sm:h-6 text-red-400 mt-2" />
-                          )}
                         </button>
-                      );
-                    })}
-                  </div>
-                )}
-                
-                {/* Text Answer */}
-                {currentActivation.type === 'text_answer' && (
-                  <form onSubmit={handleTextAnswerSubmit} className="space-y-4">
-                    <input
-                      type="text"
-                      value={textAnswer}
-                      onChange={(e) => setTextAnswer(e.target.value)}
-                      placeholder="Type your answer here..."
-                      disabled={hasAnswered}
-                      className="w-full px-4 py-3 bg-white/20 border border-white/30 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/50 text-base"
-                    />
-                    
-                    {!hasAnswered && (
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Text Answer */}
+                  {currentActivation.type === 'text_answer' && (
+                    <form onSubmit={handleTextAnswerSubmit} className="space-y-4">
+                      <input
+                        type="text"
+                        value={textAnswer}
+                        onChange={(e) => setTextAnswer(e.target.value)}
+                        disabled={hasAnswered}
+                        placeholder="Type your answer..."
+                        className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:border-white/40"
+                      />
                       <button
                         type="submit"
-                        disabled={!textAnswer.trim()}
-                        className="w-full flex items-center justify-center gap-2 py-3 bg-white/20 hover:bg-white/30 text-white rounded-lg transition disabled:opacity-50"
+                        disabled={hasAnswered || !textAnswer.trim()}
+                        className={`w-full px-4 py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all ${
+                          hasAnswered
+                            ? 'bg-white/10 text-white/50 cursor-not-allowed'
+                            : 'bg-white text-gray-900 hover:bg-gray-100'
+                        }`}
                       >
                         <Send className="w-5 h-5" />
                         Submit Answer
                       </button>
-                    )}
-                    
-                    {/* BULLETPROOF: Only show results if canRevealResults() returns true */}
-                    {showResult && canRevealResults() && (
-                      <div className={`p-4 rounded-lg ${isCorrect ? 'bg-green-400/30' : 'bg-red-400/30'}`}>
-                        <div className="flex items-center gap-2 text-white">
-                          {isCorrect ? (
-                            <>
-                              <CheckCircle className="w-6 h-6" />
-                              <span className="font-semibold">Correct!</span>
-                            </>
-                          ) : (
-                            <>
-                              <XCircle className="w-6 h-6" />
-                              <span className="font-semibold">Incorrect</span>
-                            </>
-                          )}
-                        </div>
-                        {!isCorrect && (
-                          <p className="text-white/80 mt-2">
-                            The correct answer was: <span className="font-medium">{currentActivation.exact_answer}</span>
-                          </p>
-                        )}
-                      </div>
-                    )}
-                  </form>
-                )}
-                
-                {/* Poll */}
-                {currentActivation.type === 'poll' && (
-                  <div>
-                    {pollState === 'pending' ? (
-                      <div className="text-center text-white py-8">
-                        <Clock className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                        <p className="text-xl">Waiting for voting to start...</p>
-                      </div>
-                    ) : pollState === 'voting' && !pollVoted ? (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                        {currentActivation.options?.map((option, index) => (
+                    </form>
+                  )}
+
+                  {/* Poll Options */}
+                  {currentActivation.type === 'poll' && (
+                    <div className="space-y-3">
+                      {pollState === 'voting' ? (
+                        currentActivation.options?.map((option, index) => (
                           <button
                             key={index}
                             onClick={() => handlePollVote(option.text, option.id)}
                             disabled={pollVoted || pollLoading}
-                            className="p-3 sm:p-4 rounded-lg bg-white/20 hover:bg-white/30 transition transform hover:scale-105 disabled:opacity-50"
+                            className={`w-full p-4 rounded-lg text-left transition-all ${
+                              pollVoted
+                                ? selectedAnswer === option.text
+                                  ? 'bg-blue-500/30 border-2 border-blue-400'
+                                  : 'bg-white/10 opacity-50'
+                                : 'bg-white/10 hover:bg-white/20 cursor-pointer'
+                            }`}
                           >
                             <div className="flex items-center gap-3">
-                              {option.media_type !== 'none' && option.media_url && (
-                                <img
+                              {option.media_url && (
+                                <img 
                                   src={getStorageUrl(option.media_url)}
-                                  alt={option.text}
-                                  className="w-10 h-10 sm:w-12 sm:h-12 rounded-full object-cover flex-shrink-0"
+                                  alt=""
+                                  className="w-12 h-12 object-cover rounded"
                                   onError={(e) => {
-                                    e.currentTarget.src = 'https://via.placeholder.com/100?text=!';
+                                    e.currentTarget.style.display = 'none';
                                   }}
                                 />
                               )}
                               <span className="text-white font-medium text-base sm:text-lg text-left">{option.text}</span>
                             </div>
                           </button>
-                        ))}
-                      </div>
-                    ) : (
-                      <PollDisplay
-                        options={currentActivation.options || []}
-                        votes={pollVotes}
-                        totalVotes={totalVotes}
-                        displayType={currentActivation.poll_display_type || 'bar'}
-                        pollState={pollState}
-                        resultFormat={currentActivation.poll_result_format}
-                        selectedAnswer={selectedAnswer}
-                        selectedOptionId={selectedOptionId}
-                        getStorageUrl={getStorageUrl}
-                        themeColors={roomTheme}
-                      />
-                    )}
-                  </div>
-                )}
-              </>
-            )}
+                        ))
+                      ) : (
+                        <PollDisplay
+                          options={currentActivation.options || []}
+                          votes={pollVotes}
+                          totalVotes={totalVotes}
+                          displayType={currentActivation.poll_display_type || 'bar'}
+                          pollState={pollState}
+                          resultFormat={currentActivation.poll_result_format}
+                          selectedAnswer={selectedAnswer}
+                          selectedOptionId={selectedOptionId}
+                          getStorageUrl={getStorageUrl}
+                          themeColors={roomTheme}
+                        />
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </ErrorBoundary>
         ) : (
