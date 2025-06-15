@@ -127,45 +127,22 @@ export default function Game() {
       return true;
     }
     
+    // CRITICAL: Check if host has explicitly revealed answers
+    if (currentActivation?.show_answers === true) {
+      console.log(`[${debugId}] 🟢 Host has revealed answers - can show results`);
+      return true;
+    }
+    
     // Has a timer but not started? Cannot reveal
     if (currentActivation?.time_limit && !currentActivation?.timer_started_at) {
       console.log(`[${debugId}] 🔴 Timer configured but not started - CANNOT reveal results`);
       return false;
     }
     
-    // CRITICAL: Check both timer states for maximum safety
-    const timerActive = timerState.isActive || hasActiveTimer;
-    const timerExpiredFlag = timerState.hasExpired || timerExpired;
-    
-    // If timer is still active, NEVER reveal results
-    if (timerActive && !timerExpiredFlag) {
-      console.log(`[${debugId}] 🔴 Timer still active - CANNOT reveal results (iPhone protection)`);
+    // Timer is running but host hasn't revealed answers yet
+    if (currentActivation?.timer_started_at && currentActivation?.show_answers === false) {
+      console.log(`[${debugId}] 🔴 Timer running but host hasn't revealed answers - CANNOT reveal results`);
       return false;
-    }
-    
-    // Double-check timer expiration using server time (most reliable for iPhone)
-    if (currentActivation?.timer_started_at && currentActivation?.time_limit) {
-      const startTime = new Date(currentActivation.timer_started_at).getTime();
-      const currentTime = Date.now();
-      const elapsedMs = currentTime - startTime;
-      const totalTimeMs = currentActivation.time_limit * 1000;
-      
-      const serverTimeExpired = elapsedMs >= totalTimeMs;
-      
-      console.log(`[${debugId}] ⏱️ Server time check:`, {
-        elapsed: Math.floor(elapsedMs / 1000),
-        total: currentActivation.time_limit,
-        expired: serverTimeExpired
-      });
-      
-      // CRITICAL: For iPhone, ONLY trust server time calculation
-      return serverTimeExpired;
-    }
-    
-    // If we have explicit expiration flags, trust them
-    if (timerExpiredFlag) {
-      console.log(`[${debugId}] 🟢 Timer explicitly expired - can reveal results`);
-      return true;
     }
     
     // Default to NOT revealing if unsure (safer for iPhone)
@@ -209,6 +186,7 @@ export default function Game() {
       id: activation.id,
       time_limit: activation.time_limit,
       timer_started_at: activation.timer_started_at,
+      show_answers: activation.show_answers,
       type: activation.type,
       isMobile,
       isIOS: /iPhone|iPad|iPod/.test(navigator.userAgent)
@@ -233,7 +211,7 @@ export default function Game() {
     setTimeRemaining(null);
     setHasActiveTimer(false);
     setTimerExpired(false);
-    setShowAnswers(false);
+    setShowAnswers(activation.show_answers === true); // Respect show_answers from host
     setShowResult(false);
     setShowPointAnimation(false);
     setPendingPoints(0);
@@ -248,7 +226,41 @@ export default function Game() {
       return;
     }
     
-    // Check if timer has already started
+    // If timer hasn't started yet, just show the time limit
+    if (!activation.timer_started_at) {
+      console.log(`[${debugId}] ⏳ Timer not started yet - waiting for host`);
+      setTimerState({
+        isActive: false,
+        timeRemaining: activation.time_limit,
+        hasExpired: false,
+        startedAt: null,
+        totalTime: activation.time_limit
+      });
+      setTimeRemaining(activation.time_limit);
+      setHasActiveTimer(false);
+      setTimerExpired(false);
+      setShowAnswers(false); // Never show answers until timer starts
+      return;
+    }
+    
+    // Timer has started - check if answers should be shown
+    if (activation.show_answers === true) {
+      console.log(`[${debugId}] ✅ Host has revealed answers`);
+      setTimerState({
+        isActive: false,
+        timeRemaining: 0,
+        hasExpired: true,
+        startedAt: activation.timer_started_at,
+        totalTime: activation.time_limit
+      });
+      setTimeRemaining(0);
+      setHasActiveTimer(false);
+      setTimerExpired(true);
+      setShowAnswers(true);
+      return;
+    }
+    
+    // Timer is running - calculate remaining time
     if (activation.timer_started_at) {
       const startTime = new Date(activation.timer_started_at).getTime();
       const currentTime = Date.now();
@@ -571,11 +583,12 @@ export default function Game() {
     }
   };
 
-  // CRITICAL FIX: Watch for timer expiration to reveal results
+  // CRITICAL FIX: Watch for timer expiration OR host reveal to show results
   useEffect(() => {
-    if ((timerState.hasExpired || timerExpired) && hasAnswered && !showResult && 
+    // Only reveal results if host has set show_answers = true
+    if (currentActivation?.show_answers === true && hasAnswered && !showResult && 
         (currentActivation?.type === 'multiple_choice' || currentActivation?.type === 'text_answer')) {
-      console.log(`[${debugId}] 🎉 Timer expired - revealing results and points!`);
+      console.log(`[${debugId}] 🎉 Host revealed answers - showing results and points!`);
       setShowResult(true);
       
       // Award pending points if we have them
@@ -609,7 +622,7 @@ export default function Game() {
         });
       }
     }
-  }, [timerState.hasExpired, timerExpired, hasAnswered, showResult, isCorrect, pointsEarned, currentActivation, debugId, hasPendingReward, pendingPoints, pendingCorrect, pendingResponseTime]);
+  }, [currentActivation?.show_answers, hasAnswered, showResult, isCorrect, pointsEarned, currentActivation, debugId, hasPendingReward, pendingPoints, pendingCorrect, pendingResponseTime]);
 
   // Fetch room and player data
   const fetchRoomAndActivation = async () => {
