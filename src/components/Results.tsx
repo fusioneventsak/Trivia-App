@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { retry, isNetworkError, logError } from '../lib/error-handling';
-import { submitPollVote, hasPlayerVoted, getPollState } from '../lib/poll-service';
 
 interface PollOption {
   id?: string;
@@ -267,7 +266,7 @@ export function usePollManager({
     } finally {
       setIsLoading(false);
     }
-  }, [activationId, options, playerId, roomId, pollingInterval, debugMode]);
+  }, [activationId, options, playerId, roomId, pollingInterval, debugMode, pollState]);
 
   // Reset poll state
   const resetPoll = useCallback(() => {
@@ -577,4 +576,4 @@ export function usePollManager({
   };
 }
 
-export default usePollManager
+export default usePollManager;
