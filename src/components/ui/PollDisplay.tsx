@@ -24,7 +24,7 @@ interface PollDisplayProps {
   selectedAnswer?: string | null;
   selectedOptionId?: string | null;
   getStorageUrl?: (url: string) => string;
-  themeColors?: any;
+  themeColors?: {
     primary_color?: string;
     secondary_color?: string;
   };
@@ -309,14 +309,14 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
   const getBarWidth = (option: PollOption): number => {
     const optionId = option.id || option.text;
     
-    if (pollState === 'voting' && !showOptionsOnly && randomBarWidths[optionId]) {
+    if (pollState === 'voting' && !showOptionsOnly) {
       return randomBarWidths[optionId] || 50;
     }
     
     // For closed/locked polls, calculate actual percentage from vote counts
     if (pollState === 'closed') {
       const voteCount = getVoteCount(option);
-      const percentage = animatedTotalVotes && animatedTotalVotes > 0 ? (voteCount / animatedTotalVotes * 100) : 0;
+      const percentage = animatedTotalVotes > 0 ? (voteCount / animatedTotalVotes * 100) : 0;
       // Ensure minimum width for options with votes
       return Math.max(percentage, voteCount > 0 ? 4 : 0);
     }
