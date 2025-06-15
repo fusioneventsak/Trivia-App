@@ -1,16 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { Trophy, RefreshCw, Users, Clock, Lock, PlayCircle, AlertCircle, WifiOff } from 'lucide-react';
+import { Trophy, Clock, AlertCircle, WifiOff } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import CountdownTimer from './ui/CountdownTimer';
 import LeaderboardDisplay from './ui/LeaderboardDisplay';
 import confetti from 'canvas-confetti';
-import PollStateIndicator from './ui/PollStateIndicator';
 import PollDisplay from './ui/PollDisplay';
 import QRCodeDisplay from './ui/QRCodeDisplay';
 import { getStorageUrl } from '../lib/utils';
-import { usePollManager } from '../hooks/usePollManager';
 import { retry, isNetworkError, getFriendlyErrorMessage } from '../lib/error-handling';
 import NetworkStatus from './ui/NetworkStatus';
 import ErrorBoundary from './ui/ErrorBoundary';
@@ -40,21 +38,13 @@ interface Activation {
   poll_display_type?: 'bar' | 'pie' | 'horizontal' | 'vertical';
   poll_state?: 'pending' | 'voting' | 'closed';
   poll_result_format?: 'percentage' | 'votes' | 'both';
-  title?: string;
-  description?: string;
-  category?: string;
-  difficulty?: 'easy' | 'medium' | 'hard';
-  tags?: string[];
-  is_public?: boolean;
   theme?: {
     primary_color: string;
     secondary_color: string;
     background_color: string;
     text_color: string;
-    container_bg_color?: string;
   };
   logo_url?: string;
-  max_players?: number;
   time_limit?: number;
   timer_started_at?: string;
   show_answers?: boolean;
@@ -63,7 +53,6 @@ interface Activation {
 export default function Results() {
   const { code } = useParams<{ code: string }>();
   const navigate = useNavigate();
-  const location = useLocation();
   const { theme: globalTheme } = useTheme();
   const [room, setRoom] = useState<any>(null);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -76,36 +65,13 @@ export default function Results() {
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const [playerRankings, setPlayerRankings] = useState<{[key: string]: number}>({});
   const [previousRankings, setPreviousRankings] = useState<{[key: string]: number}>({});
-  const [previousActivationType, setPreviousActivationType] = useState<string | null>(null);
-  const [debugMode, setDebugMode] = useState(false);
-  const [activationRefreshCount, setActivationRefreshCount] = useState(0);
-  const activationChannelRef = useRef<any>(null);
-  const debugIdRef = useRef<string>(`results-${Math.random().toString(36).substring(2, 7)}`);
+  const [pollVotes, setPollVotes] = useState<{[key: string]: number}>({});
+  const [totalVotes, setTotalVotes] = useState(0);
   const currentActivationIdRef = useRef<string | null>(null);
-  const gameSessionChannelRef = useRef<any>(null);
   const [showNetworkStatus, setShowNetworkStatus] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
-
-  // Poll management
-  const {
-    votesByText: pollVotes,
-    totalVotes,
-    pollState,
-    error: pollError,
-    refetch: refetchPoll
-  } = usePollManager({
-    activationId: currentActivation?.id || null,
-    playerId: null,
-    roomId: room?.id || null
-  });
 
   // Determine theme
   const activeTheme = currentActivation?.theme || room?.theme || globalTheme;
-
-  // Check if device is mobile
-  useEffect(() => {
-    setIsMobile(/iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
-  }, []);
 
   // Calculate player rankings
   useEffect(() => {
@@ -227,16 +193,48 @@ export default function Results() {
         
         currentActivationIdRef.current = activationData.id;
         setCurrentActivation(activationData);
-        setPreviousActivationType(activationData.type);
+        
+        // If it's a poll, fetch poll results
+        if (activationData.type === 'poll') {
+          fetchPollResults(activationData.id);
+        }
       } else {
         currentActivationIdRef.current = null;
         setCurrentActivation(null);
+        setPollVotes({});
+        setTotalVotes(0);
       }
     } catch (err: any) {
       console.error('Error fetching activation:', err);
       if (isNetworkError(err)) {
         setNetworkError(true);
       }
+    }
+  };
+
+  // Fetch poll results
+  const fetchPollResults = async (activationId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('poll_votes')
+        .select('option_text')
+        .eq('activation_id', activationId);
+
+      if (error) throw error;
+
+      // Count votes by option
+      const voteCounts: {[key: string]: number} = {};
+      let total = 0;
+      
+      data?.forEach(vote => {
+        voteCounts[vote.option_text] = (voteCounts[vote.option_text] || 0) + 1;
+        total++;
+      });
+
+      setPollVotes(voteCounts);
+      setTotalVotes(total);
+    } catch (err) {
+      console.error('Error fetching poll results:', err);
     }
   };
 
@@ -267,7 +265,7 @@ export default function Results() {
     if (!room?.id) return;
 
     // Subscribe to game session changes
-    gameSessionChannelRef.current = supabase
+    const gameSessionChannel = supabase
       .channel(`game_session:${room.id}`)
       .on(
         'postgres_changes',
@@ -284,7 +282,7 @@ export default function Results() {
       .subscribe();
 
     // Subscribe to activation changes
-    activationChannelRef.current = supabase
+    const activationChannel = supabase
       .channel(`activation_changes:${room.id}`)
       .on(
         'postgres_changes',
@@ -319,46 +317,48 @@ export default function Results() {
       )
       .subscribe();
 
-    return () => {
-      gameSessionChannelRef.current?.unsubscribe();
-      activationChannelRef.current?.unsubscribe();
-      playerChannel.unsubscribe();
-    };
-  }, [room?.id]);
-
-  // Refresh poll data when activation changes
-  useEffect(() => {
+    // Subscribe to poll votes if there's an active poll
+    let pollChannel: any = null;
     if (currentActivation?.type === 'poll' && currentActivation?.id) {
-      refetchPoll();
+      pollChannel = supabase
+        .channel(`poll_votes:${currentActivation.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'poll_votes',
+            filter: `activation_id=eq.${currentActivation.id}`
+          },
+          () => {
+            fetchPollResults(currentActivation.id);
+          }
+        )
+        .subscribe();
     }
-  }, [currentActivation?.id, currentActivation?.type, refetchPoll]);
+
+    return () => {
+      gameSessionChannel.unsubscribe();
+      activationChannel.unsubscribe();
+      playerChannel.unsubscribe();
+      if (pollChannel) {
+        pollChannel.unsubscribe();
+      }
+    };
+  }, [room?.id, currentActivation?.id, currentActivation?.type]);
 
   // Celebration effect for leaderboard
   useEffect(() => {
     if (currentActivation?.type === 'leaderboard' && players.length > 0) {
-      const topPlayer = players[0];
-      if (topPlayer && previousActivationType !== 'leaderboard') {
-        setTimeout(() => {
-          confetti({
-            particleCount: 200,
-            spread: 80,
-            origin: { y: 0.3 }
-          });
-        }, 500);
-      }
+      setTimeout(() => {
+        confetti({
+          particleCount: 200,
+          spread: 80,
+          origin: { y: 0.3 }
+        });
+      }, 500);
     }
-  }, [currentActivation?.type, players, previousActivationType]);
-
-  // Toggle debug mode with keyboard shortcut
-  useEffect(() => {
-    const handleKeyPress = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && e.key === 'D') {
-        setDebugMode(prev => !prev);
-      }
-    };
-    window.addEventListener('keydown', handleKeyPress);
-    return () => window.removeEventListener('keydown', handleKeyPress);
-  }, []);
+  }, [currentActivation?.type, players.length]);
 
   // Render question media
   const renderQuestionMedia = () => {
@@ -369,7 +369,7 @@ export default function Results() {
     return (
       <div className="mb-6 flex justify-center">
         {currentActivation.media_type === 'youtube' ? (
-          <div className="w-full max-w-2xl rounded-lg shadow-md overflow-hidden">
+          <div className="w-full max-w-3xl rounded-lg shadow-md overflow-hidden">
             <div className="aspect-video">
               <MediaDisplay
                 url={currentActivation.media_url}
@@ -385,7 +385,7 @@ export default function Results() {
             url={currentActivation.media_url}
             type={currentActivation.media_type}
             alt="Question media"
-            className="max-h-96 rounded-lg shadow-md"
+            className="max-h-[60vh] rounded-lg shadow-md"
             fallbackText="Image not available"
           />
         )}
@@ -395,34 +395,15 @@ export default function Results() {
 
   // Generate QR code URL for this room
   const getJoinUrl = () => {
-    try {
-      const baseUrl = window.location.origin;
-      return `${baseUrl}/join?code=${room?.room_code || code}`;
-    } catch (err) {
-      console.error('Error generating join URL:', err);
-      return `/join?code=${room?.room_code || code}`;
-    }
+    const baseUrl = window.location.origin;
+    return `${baseUrl}/join?code=${room?.room_code || code}`;
   };
-
-  if (debugMode) {
-    console.log('Current state:', {
-      id: debugIdRef.current,
-      room,
-      players: players.length,
-      currentActivation: currentActivation?.id,
-      activationType: currentActivation?.type,
-      showAnswers,
-      pollState,
-      pollVotes,
-      totalVotes
-    });
-  }
 
   // Network error state
   if (networkError) {
     return (
       <div 
-        className="flex flex-col items-center justify-center min-h-screen p-4 bg-theme-gradient"
+        className="flex flex-col items-center justify-center min-h-screen p-4"
         style={{ 
           background: `linear-gradient(to bottom right, ${activeTheme.primary_color}, ${activeTheme.secondary_color})` 
         }}
@@ -447,7 +428,7 @@ export default function Results() {
   if (loading) {
     return (
       <div 
-        className="flex flex-col items-center justify-center min-h-screen p-4 bg-theme-gradient"
+        className="flex flex-col items-center justify-center min-h-screen p-4"
         style={{ 
           background: `linear-gradient(to bottom right, ${activeTheme.primary_color}, ${activeTheme.secondary_color})` 
         }}
@@ -462,7 +443,7 @@ export default function Results() {
   if (error || !room) {
     return (
       <div 
-        className="flex flex-col items-center justify-center min-h-screen p-4 bg-theme-gradient"
+        className="flex flex-col items-center justify-center min-h-screen p-4"
         style={{ 
           background: `linear-gradient(to bottom right, ${activeTheme.primary_color}, ${activeTheme.secondary_color})` 
         }}
@@ -485,7 +466,7 @@ export default function Results() {
 
   return (
     <div 
-      className="min-h-screen p-4 bg-theme-gradient"
+      className="min-h-screen p-4 flex items-center justify-center"
       style={{ 
         background: `linear-gradient(to bottom right, ${activeTheme.primary_color}, ${activeTheme.secondary_color})` 
       }}
@@ -496,201 +477,144 @@ export default function Results() {
         onClose={() => setShowNetworkStatus(false)} 
       />
 
-      {/* Header */}
-      <div className="max-w-7xl mx-auto mb-6">
-        <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 flex items-center justify-between">
-          <div className="flex items-center">
-            {room.logo_url && (
-              <img 
-                src={getStorageUrl(room.logo_url)} 
-                alt="Room logo" 
-                className="h-12 w-auto object-contain mr-4"
-              />
-            )}
-            <div>
-              <h1 className="text-2xl font-bold text-white">{room.name}</h1>
-              <p className="text-white/70">Room Code: {room.room_code}</p>
-            </div>
-          </div>
-          <div className="flex items-center space-x-4">
-            {timeRemaining !== null && timeRemaining > 0 && (
-              <div className="bg-white/20 px-4 py-2 rounded-lg">
-                <CountdownTimer 
-                  duration={timeRemaining} 
-                  onComplete={() => setShowAnswers(true)}
-                  size="sm"
-                  showLabel={false}
-                />
-              </div>
-            )}
-            <div className="bg-white/20 px-4 py-2 rounded-lg flex items-center">
-              <Users className="w-5 h-5 text-white mr-2" />
-              <span className="text-white font-medium">{players.length} Players</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto grid lg:grid-cols-3 gap-6">
-        {/* Left Column - Current Activity */}
-        <div className="lg:col-span-2">
-          <ErrorBoundary>
-            {currentActivation ? (
-              <div className="bg-white/10 backdrop-blur-sm rounded-lg p-6">
-                {currentActivation.type === 'leaderboard' ? (
-                  <>
-                    <div className="text-center mb-6">
-                      <Trophy className="w-16 h-16 text-yellow-400 mx-auto mb-4" />
-                      <h2 className="text-3xl font-bold text-white mb-2">Final Leaderboard</h2>
-                      <p className="text-white/70">Congratulations to all participants!</p>
-                    </div>
+      <div className="w-full max-w-6xl">
+        <ErrorBoundary>
+          {currentActivation ? (
+            // Active template display
+            <div className="bg-white/10 backdrop-blur-sm rounded-lg p-8">
+              {/* Timer display */}
+              {timeRemaining !== null && timeRemaining > 0 && (
+                <div className="flex justify-center mb-6">
+                  <div className="bg-white/20 px-6 py-3 rounded-lg">
+                    <CountdownTimer 
+                      duration={timeRemaining} 
+                      onComplete={() => setShowAnswers(true)}
+                      size="lg"
+                      showLabel={false}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Leaderboard template */}
+              {currentActivation.type === 'leaderboard' ? (
+                <>
+                  <div className="text-center mb-8">
+                    <Trophy className="w-20 h-20 text-yellow-400 mx-auto mb-4" />
+                    <h1 className="text-4xl font-bold text-white mb-2">Leaderboard</h1>
+                    <p className="text-white/70 text-xl">Congratulations to all participants!</p>
+                  </div>
+                  <div className="max-w-3xl mx-auto">
                     <LeaderboardDisplay
                       players={players}
                       currentPlayerId={null}
                       playerRankings={playerRankings}
                       previousRankings={previousRankings}
                       showFullLeaderboard={true}
-                      maxPlayersToShow={10}
+                      maxPlayersToShow={15}
                       theme={activeTheme}
                     />
-                  </>
-                ) : (
-                  <>
-                    <h2 className="text-2xl font-bold text-white mb-4">{currentActivation.question}</h2>
-                    
-                    {renderQuestionMedia()}
+                  </div>
+                </>
+              ) : (
+                // Question templates (multiple choice, text answer, poll)
+                <>
+                  <h1 className="text-3xl font-bold text-white text-center mb-6">
+                    {currentActivation.question}
+                  </h1>
+                  
+                  {renderQuestionMedia()}
 
-                    {currentActivation.type === 'poll' && (
-                      <div className="mb-4">
-                        <PollStateIndicator state={pollState} />
-                      </div>
-                    )}
+                  {/* Multiple choice options */}
+                  {currentActivation.type === 'multiple_choice' && showAnswers && (
+                    <div className="max-w-3xl mx-auto space-y-4">
+                      {currentActivation.options?.map((option, index) => (
+                        <div 
+                          key={index}
+                          className={`p-6 rounded-lg border-2 transition-all ${
+                            option.text === currentActivation.correct_answer
+                              ? 'bg-green-500/20 border-green-400 text-white'
+                              : 'bg-white/10 border-white/20 text-white/70'
+                          }`}
+                        >
+                          <div className="flex items-center">
+                            {option.media_url && option.media_type && option.media_type !== 'none' && (
+                              <img
+                                src={getStorageUrl(option.media_url)}
+                                alt={option.text}
+                                className="w-20 h-20 object-cover rounded mr-4"
+                              />
+                            )}
+                            <span className="text-xl font-medium">{option.text}</span>
+                            {option.text === currentActivation.correct_answer && (
+                              <span className="ml-auto text-green-400 font-bold text-xl">✓ Correct</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
-                    {(currentActivation.type === 'multiple_choice' || currentActivation.type === 'text_answer') && showAnswers ? (
-                      <div className="space-y-3">
-                        {currentActivation.type === 'multiple_choice' && currentActivation.options?.map((option, index) => (
-                          <div 
-                            key={index}
-                            className={`p-4 rounded-lg border-2 transition-all ${
-                              option.text === currentActivation.correct_answer
-                                ? 'bg-green-500/20 border-green-400 text-white'
-                                : 'bg-white/10 border-white/20 text-white/70'
-                            }`}
-                          >
-                            <div className="flex items-center">
-                              {option.media_url && option.media_type && option.media_type !== 'none' && (
-                                <img
-                                  src={getStorageUrl(option.media_url)}
-                                  alt={option.text}
-                                  className="w-16 h-16 object-cover rounded mr-3"
-                                />
-                              )}
-                              <span className="font-medium">{option.text}</span>
-                              {option.text === currentActivation.correct_answer && (
-                                <span className="ml-auto text-green-400 font-bold">✓ Correct</span>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                        {currentActivation.type === 'text_answer' && currentActivation.exact_answer && (
-                          <div className="p-4 rounded-lg bg-green-500/20 border-2 border-green-400 text-white">
-                            <span className="font-medium">Correct Answer: {currentActivation.exact_answer}</span>
-                          </div>
-                        )}
+                  {/* Text answer */}
+                  {currentActivation.type === 'text_answer' && showAnswers && currentActivation.exact_answer && (
+                    <div className="max-w-3xl mx-auto">
+                      <div className="p-6 rounded-lg bg-green-500/20 border-2 border-green-400 text-white">
+                        <span className="text-xl font-medium">Correct Answer: {currentActivation.exact_answer}</span>
                       </div>
-                    ) : currentActivation.type === 'poll' ? (
+                    </div>
+                  )}
+
+                  {/* Poll results */}
+                  {currentActivation.type === 'poll' && (
+                    <div className="max-w-3xl mx-auto">
                       <PollDisplay
                         options={currentActivation.options || []}
                         votes={pollVotes}
                         totalVotes={totalVotes}
                         displayType={currentActivation.poll_display_type || 'bar'}
-                        pollState={pollState}
+                        pollState={currentActivation.poll_state || 'voting'}
                         resultFormat={currentActivation.poll_result_format}
                         selectedAnswer=""
                         selectedOptionId=""
                         getStorageUrl={getStorageUrl}
                         themeColors={activeTheme}
                       />
-                    ) : !showAnswers ? (
-                      <div className="text-center py-8">
-                        <Clock className="w-12 h-12 text-white/50 mx-auto mb-3" />
-                        <p className="text-white/70">Waiting for answers to be revealed...</p>
-                      </div>
-                    ) : null}
-                  </>
-                )}
-              </div>
-            ) : (
-              <div className="bg-white/10 backdrop-blur-sm rounded-lg p-8 text-center">
-                {room.settings?.results_page_message ? (
-                  <>
-                    <Trophy className="w-16 h-16 text-white/50 mx-auto mb-4" />
-                    <p className="text-xl text-white">{room.settings.results_page_message}</p>
-                  </>
-                ) : (
-                  <>
-                    <PlayCircle className="w-16 h-16 text-white/50 mx-auto mb-4" />
-                    <p className="text-xl text-white">Waiting for the host to start an activity...</p>
-                  </>
-                )}
-              </div>
-            )}
-          </ErrorBoundary>
-        </div>
+                    </div>
+                  )}
 
-        {/* Right Column - Leaderboard & QR Code */}
-        <div className="space-y-6">
-          {/* QR Code */}
-          <div className="bg-white/10 backdrop-blur-sm rounded-lg p-6">
-            <QRCodeDisplay 
-              value={getJoinUrl()}
-              size={isMobile ? 150 : 200}
-              title="Join This Room"
-              subtitle={`Room Code: ${room.room_code}`}
-              theme={activeTheme}
-              logoUrl={room.logo_url}
-              className="!p-4"
-            />
-          </div>
-
-          {/* Leaderboard */}
-          {currentActivation?.type !== 'leaderboard' && (
-            <div className="bg-white/10 backdrop-blur-sm rounded-lg p-6">
-              <h3 className="text-xl font-bold text-white mb-4 flex items-center">
-                <Trophy className="w-5 h-5 mr-2" />
-                Leaderboard
-              </h3>
-              <LeaderboardDisplay
-                players={players}
-                currentPlayerId={null}
-                playerRankings={playerRankings}
-                previousRankings={previousRankings}
-                showFullLeaderboard={false}
-                maxPlayersToShow={5}
+                  {/* Waiting for answers */}
+                  {!showAnswers && currentActivation.type !== 'poll' && (
+                    <div className="text-center py-12">
+                      <Clock className="w-16 h-16 text-white/50 mx-auto mb-4" />
+                      <p className="text-white/70 text-xl">Waiting for answers to be revealed...</p>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          ) : (
+            // No active template - show QR code
+            <div className="bg-white/10 backdrop-blur-sm rounded-lg p-12 text-center">
+              <h1 className="text-3xl font-bold text-white mb-8">{room.name}</h1>
+              <QRCodeDisplay 
+                value={getJoinUrl()}
+                size={250}
+                title="Join This Room"
+                subtitle={`Room Code: ${room.room_code}`}
                 theme={activeTheme}
+                logoUrl={room.logo_url}
+                className="!p-6"
               />
+              {room.settings?.results_page_message && (
+                <p className="mt-8 text-xl text-white/80">
+                  {room.settings.results_page_message}
+                </p>
+              )}
             </div>
           )}
-        </div>
+        </ErrorBoundary>
       </div>
-
-      {/* Debug Panel */}
-      {debugMode && (
-        <div className="fixed bottom-4 right-4 bg-black/80 text-white p-4 rounded-lg text-xs max-w-md">
-          <div className="font-bold mb-2">Debug Info ({debugIdRef.current})</div>
-          <div>Room ID: {room?.id}</div>
-          <div>Room Code: {room?.room_code}</div>
-          <div>Players: {players.length}</div>
-          <div>Current Activation: {currentActivation?.id || 'None'}</div>
-          <div>Type: {currentActivation?.type || 'None'}</div>
-          <div>Show Answers: {showAnswers.toString()}</div>
-          <div>Time Remaining: {timeRemaining || 'No timer'}</div>
-          <div>Poll State: {pollState}</div>
-          <div>Poll Votes: {totalVotes}</div>
-          <div>Refresh Count: {activationRefreshCount}</div>
-        </div>
-      )}
     </div>
   );
 }
