@@ -56,7 +56,7 @@ export default function Game() {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
   const { theme } = useTheme();
-  const { currentPlayerId, setCurrentPlayerId, addPlayer, updatePlayerScore, getCurrentPlayer } = useGameStore();
+  const { currentPlayerId, addPlayer, updatePlayerScore, getCurrentPlayer } = useGameStore();
   
   // Core state
   const [currentActivation, setCurrentActivation] = useState<Activation | null>(null);
@@ -77,7 +77,7 @@ export default function Game() {
   const [showNetworkStatus, setShowNetworkStatus] = useState(false);
 
   // CRITICAL FIX: Consolidated timer state
-  const [timerState, setTimerState] = useState<TimerState>({
+  const [timerState, setTimerState] = useState<any>({
     isActive: false,
     timeRemaining: null,
     hasExpired: false,
@@ -775,11 +775,16 @@ export default function Game() {
                         (currentActivation?.type === 'multiple_choice' || currentActivation?.type === 'text_answer');
 
   // Get room theme
-  const roomTheme = room?.theme_colors || theme.colors;
+  const roomTheme = room?.theme || {
+    primary_color: theme.primary_color || '#6366F1',
+    secondary_color: theme.secondary_color || '#8B5CF6',
+    background_color: theme.background_color || '#F3F4F6',
+    text_color: theme.text_color || '#1F2937'
+  };
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: roomTheme.primary }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: roomTheme.primary_color }}>
         <div className="text-center">
           <Loader2 className="w-12 h-12 animate-spin text-white mb-4 mx-auto" />
           <p className="text-white text-lg">Loading game...</p>
@@ -790,7 +795,7 @@ export default function Game() {
 
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: roomTheme.primary }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: roomTheme.primary_color }}>
         <div className="bg-white/10 backdrop-blur-sm rounded-lg shadow-lg p-8 max-w-md w-full mx-4">
           <AlertCircle className="w-12 h-12 text-red-400 mb-4 mx-auto" />
           <h2 className="text-2xl font-bold text-white mb-2">Error</h2>
@@ -808,7 +813,7 @@ export default function Game() {
 
   if (!currentPlayerId) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: roomTheme.primary }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: roomTheme.primary_color }}>
         <div className="bg-white/10 backdrop-blur-sm rounded-lg shadow-lg p-8 max-w-md w-full mx-4">
           <Trophy className="w-12 h-12 text-yellow-400 mb-4 mx-auto" />
           <h2 className="text-2xl font-bold text-white mb-4">Join the Game!</h2>
@@ -829,8 +834,8 @@ export default function Game() {
     <div 
       className="min-h-screen flex flex-col overflow-x-hidden"
       style={{ 
-        backgroundColor: roomTheme.primary,
-        background: `linear-gradient(135deg, ${roomTheme.primary} 0%, ${roomTheme.secondary} 100%)`
+        backgroundColor: roomTheme.primary_color,
+        background: `linear-gradient(135deg, ${roomTheme.primary_color} 0%, ${roomTheme.secondary_color} 100%)`
       }}
     >
       {showNetworkStatus && <NetworkStatus />}

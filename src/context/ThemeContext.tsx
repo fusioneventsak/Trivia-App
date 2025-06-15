@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { ThemeColors, defaultTheme, applyTheme } from '../lib/theme-utils';
 
 interface ThemeContextType {
-  theme: ThemeColors;
+  theme: ThemeColors & { colors?: any };
   setTheme: (theme: ThemeColors) => void;
   updateThemeColor: (key: keyof ThemeColors, value: string) => void;
   resetTheme: () => void;
@@ -38,17 +38,41 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({
   initialTheme 
 }) => {
   // Try to load theme from localStorage first
-  const [theme, setThemeState] = useState<ThemeColors>(() => {
+  const [theme, setThemeState] = useState<ThemeColors & { colors?: any }>(() => {
     try {
       const savedTheme = localStorage.getItem('app-theme');
       if (savedTheme) {
         const parsedTheme = JSON.parse(savedTheme);
-        return { ...defaultTheme, ...parsedTheme };
+        const fullTheme = { ...defaultTheme, ...parsedTheme };
+        // Add colors property for backward compatibility
+        fullTheme.colors = {
+          primary: fullTheme.primary_color,
+          secondary: fullTheme.secondary_color,
+          background: fullTheme.background_color,
+          text: fullTheme.text_color
+        };
+        return fullTheme;
       }
-      return initialTheme || defaultTheme;
+      const fullTheme = initialTheme || defaultTheme;
+      // Add colors property for backward compatibility
+      fullTheme.colors = {
+        primary: fullTheme.primary_color,
+        secondary: fullTheme.secondary_color,
+        background: fullTheme.background_color,
+        text: fullTheme.text_color
+      };
+      return fullTheme;
     } catch (error) {
       console.error('Error loading theme from localStorage:', error);
-      return initialTheme || defaultTheme;
+      const fullTheme = initialTheme || defaultTheme;
+      // Add colors property for backward compatibility
+      fullTheme.colors = {
+        primary: fullTheme.primary_color,
+        secondary: fullTheme.secondary_color,
+        background: fullTheme.background_color,
+        text: fullTheme.text_color
+      };
+      return fullTheme;
     }
   });
 
@@ -99,11 +123,20 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({
   const setTheme = (newTheme: ThemeColors) => {
     console.log('Setting new theme:', newTheme);
     // Ensure we preserve any default values that might be missing
-    setThemeState(prev => {
+    setThemeState((prev: any) => {
       const mergedTheme = {
         ...prev,
         ...newTheme
       };
+      
+      // Update colors property for backward compatibility
+      mergedTheme.colors = {
+        primary: mergedTheme.primary_color,
+        secondary: mergedTheme.secondary_color,
+        background: mergedTheme.background_color,
+        text: mergedTheme.text_color
+      };
+      
       console.log('Merged theme:', mergedTheme);
       return mergedTheme;
     });
@@ -112,16 +145,34 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({
   // Update a single color in the theme
   const updateThemeColor = (key: keyof ThemeColors, value: string) => {
     console.log(`Updating theme color ${key} to ${value}`);
-    setThemeState(prev => ({
-      ...prev,
-      [key]: value
-    }));
+    setThemeState((prev: any) => {
+      const newTheme = {
+        ...prev,
+        [key]: value
+      };
+      
+      // Update colors property for backward compatibility
+      if (key === 'primary_color') newTheme.colors = { ...prev.colors, primary: value };
+      if (key === 'secondary_color') newTheme.colors = { ...prev.colors, secondary: value };
+      if (key === 'background_color') newTheme.colors = { ...prev.colors, background: value };
+      if (key === 'text_color') newTheme.colors = { ...prev.colors, text: value };
+      
+      return newTheme;
+    });
   };
 
   // Reset theme to default
   const resetTheme = () => {
     console.log('Resetting theme to default');
-    setThemeState(defaultTheme);
+    const fullTheme = { ...defaultTheme };
+    // Add colors property for backward compatibility
+    fullTheme.colors = {
+      primary: fullTheme.primary_color,
+      secondary: fullTheme.secondary_color,
+      background: fullTheme.background_color,
+      text: fullTheme.text_color
+    };
+    setThemeState(fullTheme);
   };
 
   // Save a new palette

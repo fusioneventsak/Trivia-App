@@ -533,6 +533,12 @@ export default function Results() {
   // Get room theme or use default theme
   const activeTheme = room?.theme || globalTheme;
 
+  // Ensure theme has all required properties
+  if (!activeTheme.primary_color) activeTheme.primary_color = globalTheme.primary_color || '#6366F1';
+  if (!activeTheme.secondary_color) activeTheme.secondary_color = globalTheme.secondary_color || '#8B5CF6';
+  if (!activeTheme.background_color) activeTheme.background_color = globalTheme.background_color || '#F3F4F6';
+  if (!activeTheme.text_color) activeTheme.text_color = globalTheme.text_color || '#1F2937';
+
   // Add effect for confetti when leaderboard is activated
   useEffect(() => {
     // Check if the activation type has changed to leaderboard
