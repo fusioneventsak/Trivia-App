@@ -456,14 +456,14 @@ export default function MobileController() {
         throw new Error('Activation not found');
       }
       
-      // If timer isn't started yet, start it and set show_answers to false
-      if (!activation.timer_started_at) {
+      // If timer isn't started yet, start it immediately
+      if (!activation.timer_started_at && activation.time_limit) {
         // Start the timer
         const { error: updateError } = await supabase
           .from('activations')
           .update({ 
             timer_started_at: new Date().toISOString(),
-            show_answers: false  // Explicitly set to false when starting timer
+            show_answers: false
           })
           .eq('id', currentActivation);
           
@@ -471,7 +471,9 @@ export default function MobileController() {
         
         setSuccessMessage('Timer started!');
         setTimeout(() => setSuccessMessage(null), 3000);
-      } else if (activation.timer_started_at && !activation.show_answers) {
+      } 
+      // If timer is running but answers aren't revealed yet, reveal them
+      else if (activation.timer_started_at && !activation.show_answers) {
         // Timer is already running - reveal answers immediately
         const { error: updateError } = await supabase
           .from('activations')
@@ -483,7 +485,9 @@ export default function MobileController() {
         const actionType = activation.type === 'poll' ? 'Results' : 'Answers';
         setSuccessMessage(`${actionType} revealed!`);
         setTimeout(() => setSuccessMessage(null), 3000);
-      } else if (activation.timer_started_at && activation.show_answers) {
+      } 
+      // If timer is running and answers are revealed, reset everything
+      else if (activation.timer_started_at && activation.show_answers) {
         // Reset timer and hide answers
         const { error: updateError } = await supabase
           .from('activations')

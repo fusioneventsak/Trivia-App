@@ -39,7 +39,11 @@ const CountdownTimer: React.FC<CountdownTimerProps> = ({
     checkMobile();
     window.addEventListener('resize', checkMobile);
     
-    let intervalId: NodeJS.Timeout | null = null;
+    // Clean up any existing timer
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
     
     // If we have a start time, calculate the remaining time based on that
     if (startTime) {
@@ -113,12 +117,11 @@ const CountdownTimer: React.FC<CountdownTimerProps> = ({
     }
     
     // Start the countdown
-    intervalId = setInterval(() => {
+    const intervalId = setInterval(() => {
       setTimeRemaining(prev => {
         if (prev <= 1) {
           if (intervalId) {
             clearInterval(intervalId);
-            intervalId = null;
           }
           setIsComplete(true);
           setProgress(0);
