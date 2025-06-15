@@ -62,7 +62,7 @@ export default function Game() {
   const [showPointAnimation, setShowPointAnimation] = useState(false);
   const [playerScore, setPlayerScore] = useState<number>(0);
   const [responseStartTime, setResponseStartTime] = useState<number | null>(null);
-  const [showAnswers, setShowAnswers] = useState(false); // Start with false - only show when timer expires
+  const [showAnswers, setShowAnswers] = useState(false); // ALWAYS start with false
   const [showNetworkStatus, setShowNetworkStatus] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
   const [debugId] = useState(`game-${Math.random().toString(36).substring(2, 7)}`);
@@ -85,16 +85,17 @@ export default function Game() {
     playerId: currentPlayerId
   });
 
-  // Log poll data for debugging
+  // DEBUG: Log critical state changes
   useEffect(() => {
-    console.log(`[${debugId}] Poll data updated:`, {
-      pollVotes,
-      totalVotes,
-      hasVoted: pollVoted,
-      selectedOptionId: pollSelectedOptionId,
-      pollState
+    console.log(`[${debugId}] Critical state update:`, {
+      hasAnswered,
+      showAnswers,
+      showResult,
+      timeRemaining,
+      activationType: currentActivation?.type,
+      pointsEarned
     });
-  }, [pollVotes, totalVotes, pollVoted, pollSelectedOptionId, pollState, debugId]);
+  }, [hasAnswered, showAnswers, showResult, timeRemaining, currentActivation?.type, pointsEarned, debugId]);
 
   // Check if player exists
   useEffect(() => {
@@ -258,7 +259,7 @@ export default function Game() {
         
       if (error) throw error;
       
-      console.log(`[${debugId}] Activation fetched successfully:`, data.type);
+      console.log(`[${debugId}] Activation fetched successfully:`, data.type, 'Timer:', data.time_limit, 'Started:', data.timer_started_at);
       setCurrentActivation(data);
       resetAnswerState();
       
@@ -286,7 +287,8 @@ export default function Game() {
 
   // EXACT SAME TIMER LOGIC AS RESULTS COMPONENT
   const setupTimer = (activation: Activation) => {
-    console.log(`[${debugId}] Setting up timer for activation: ${activation.id}`);
+    console.log(`[${debugId}] Setting up timer for activation: ${activation.id}, time_limit: ${activation.time_limit}, timer_started_at: ${activation.timer_started_at}`);
+    
     // Clear any existing timer
     if (timerIntervalRef.current) {
       clearInterval(timerIntervalRef.current);
@@ -295,10 +297,11 @@ export default function Game() {
     
     // Reset timer state
     setTimeRemaining(null);
-    setShowAnswers(false); // Default to hiding answers
+    setShowAnswers(false); // ALWAYS start with false for fair scoring
     
     // If no activation or no time limit, show answers and return
     if (!activation || !activation.time_limit) {
+      console.log(`[${debugId}] No time limit, showing answers immediately`);
       setShowAnswers(activation?.show_answers !== false);
       return;
     }
@@ -311,8 +314,10 @@ export default function Game() {
       const totalTimeMs = activation.time_limit * 1000;
       
       console.log(`[${debugId}] Timer calculation: elapsed=${elapsedMs}ms, total=${totalTimeMs}ms`);
+      
       // If timer has already expired, show answers
       if (elapsedMs >= totalTimeMs) {
+        console.log(`[${debugId}] Timer already expired, showing answers`);
         setTimeRemaining(0);
         setShowAnswers(true); // Always show answers when timer expires
         return;
@@ -320,15 +325,17 @@ export default function Game() {
       
       // Otherwise, calculate remaining time and start countdown
       const remainingMs = totalTimeMs - elapsedMs;
-      setTimeRemaining(Math.ceil(remainingMs / 1000));
-      setShowAnswers(false);
-      console.log(`[${debugId}] Starting timer with ${Math.ceil(remainingMs / 1000)} seconds remaining`);
+      const remainingSeconds = Math.ceil(remainingMs / 1000);
+      setTimeRemaining(remainingSeconds);
+      setShowAnswers(false); // Keep answers hidden
+      console.log(`[${debugId}] Starting timer with ${remainingSeconds} seconds remaining`);
       
       // Start countdown timer
       timerIntervalRef.current = setInterval(() => {
         setTimeRemaining(prev => {
           if (prev === null || prev <= 1) {
             // Time's up - clear interval and always show answers
+            console.log(`[${debugId}] Timer completed! Showing answers now.`);
             if (timerIntervalRef.current) {
               clearInterval(timerIntervalRef.current);
               timerIntervalRef.current = null;
@@ -341,6 +348,10 @@ export default function Game() {
           return prev - 1;
         });
       }, 1000);
+    } else {
+      console.log(`[${debugId}] Timer not started yet, keeping answers hidden`);
+      setTimeRemaining(activation.time_limit);
+      setShowAnswers(false);
     }
   };
   
@@ -352,11 +363,13 @@ export default function Game() {
     setShowResult(false);
     setIsCorrect(false);
     setResponseStartTime(null);
+    setPointsEarned(0);
+    setShowPointAnimation(false);
   };
   
   const handleMultipleChoiceAnswer = async (answer: string, optionId?: string) => {
     if (hasAnswered || !currentActivation || !currentPlayerId) return;
-    console.log(`[${debugId}] Handling multiple choice answer: ${answer}`);
+    console.log(`[${debugId}] Handling multiple choice answer: ${answer}, showAnswers: ${showAnswers}`);
     
     setSelectedAnswer(answer);
     if (optionId) setSelectedOptionId(optionId);
@@ -366,27 +379,26 @@ export default function Game() {
     const isAnswerCorrect = answer === currentActivation.correct_answer;
     setIsCorrect(isAnswerCorrect);
     
-    // NEVER show result or award points until timer completes (showAnswers = true)
-    // Always update database score in background
+    // CRITICAL: Calculate and store points but NEVER show them until timer completes
+    let calculatedPoints = 0;
     if (isAnswerCorrect) {
       const basePoints = 100;
       const timeBonus = getTimeBonus(responseTime);
-      const totalPoints = calculatePoints(basePoints, timeBonus);
+      calculatedPoints = calculatePoints(basePoints, timeBonus);
       
-      // Store points for later display but don't show yet
-      setPointsEarned(totalPoints);
-      
-      // Update player score in database immediately
-      await updatePlayerScoreInDB(totalPoints, true, responseTime);
-    } else {
-      // Update stats for incorrect answer
-      await updatePlayerScoreInDB(0, false, responseTime);
+      // Store points for later display but DON'T show yet
+      setPointsEarned(calculatedPoints);
+      console.log(`[${debugId}] Calculated points: ${calculatedPoints}, but not showing until timer completes`);
     }
     
-    // Only show results if timer has already expired
+    // ALWAYS update database score immediately (for leaderboard accuracy)
+    await updatePlayerScoreInDB(calculatedPoints, isAnswerCorrect, responseTime);
+    
+    // CRITICAL: Only show results if timer has already expired
     if (showAnswers) {
+      console.log(`[${debugId}] Timer already completed, showing results immediately`);
       setShowResult(true);
-      if (isAnswerCorrect) {
+      if (isAnswerCorrect && calculatedPoints > 0) {
         setShowPointAnimation(true);
         // Fire confetti
         confetti({
@@ -395,13 +407,15 @@ export default function Game() {
           origin: { y: 0.6 }
         });
       }
+    } else {
+      console.log(`[${debugId}] Timer still running, hiding results until completion`);
     }
   };
   
   const handleTextAnswerSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (hasAnswered || !currentActivation || !currentPlayerId || !textAnswer.trim()) return;
-    console.log(`[${debugId}] Handling text answer submission: ${textAnswer}`);
+    console.log(`[${debugId}] Handling text answer submission: ${textAnswer}, showAnswers: ${showAnswers}`);
     
     setHasAnswered(true);
     
@@ -412,27 +426,26 @@ export default function Game() {
     
     setIsCorrect(isAnswerCorrect);
     
-    // NEVER show result or award points until timer completes (showAnswers = true)
-    // Always update database score in background
+    // CRITICAL: Calculate and store points but NEVER show them until timer completes
+    let calculatedPoints = 0;
     if (isAnswerCorrect) {
       const basePoints = 150; // Text answers worth more
       const timeBonus = getTimeBonus(responseTime);
-      const totalPoints = calculatePoints(basePoints, timeBonus);
+      calculatedPoints = calculatePoints(basePoints, timeBonus);
       
-      // Store points for later display but don't show yet
-      setPointsEarned(totalPoints);
-      
-      // Update player score in database immediately
-      await updatePlayerScoreInDB(totalPoints, true, responseTime);
-    } else {
-      // Update stats for incorrect answer
-      await updatePlayerScoreInDB(0, false, responseTime);
+      // Store points for later display but DON'T show yet
+      setPointsEarned(calculatedPoints);
+      console.log(`[${debugId}] Calculated points: ${calculatedPoints}, but not showing until timer completes`);
     }
     
-    // Only show results if timer has already expired
+    // ALWAYS update database score immediately (for leaderboard accuracy)
+    await updatePlayerScoreInDB(calculatedPoints, isAnswerCorrect, responseTime);
+    
+    // CRITICAL: Only show results if timer has already expired
     if (showAnswers) {
+      console.log(`[${debugId}] Timer already completed, showing results immediately`);
       setShowResult(true);
-      if (isAnswerCorrect) {
+      if (isAnswerCorrect && calculatedPoints > 0) {
         setShowPointAnimation(true);
         // Fire confetti
         confetti({
@@ -441,6 +454,8 @@ export default function Game() {
           origin: { y: 0.6 }
         });
       }
+    } else {
+      console.log(`[${debugId}] Timer still running, hiding results until completion`);
     }
   };
   
@@ -543,11 +558,11 @@ export default function Game() {
     }
   };
   
-  // Watch for timer completion to show results and points
+  // CRITICAL: Watch for timer completion to show results and points
   useEffect(() => {
     if (showAnswers && hasAnswered && !showResult && (currentActivation?.type === 'multiple_choice' || currentActivation?.type === 'text_answer')) {
       // Timer just completed, now show results and points if correct
-      console.log(`[${debugId}] Timer completed - showing results and points`);
+      console.log(`[${debugId}] Timer completed - revealing results and points!`);
       setShowResult(true);
       
       if (isCorrect && pointsEarned > 0) {
@@ -645,45 +660,52 @@ export default function Game() {
       )}
       
       <div className="max-w-4xl mx-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+        {/* Header - IMPROVED MOBILE VISIBILITY */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-4">
           <div className="flex items-center">
             {room?.logo_url && (
               <img 
                 src={room.logo_url} 
                 alt={room.name} 
-                className="h-10 w-auto object-contain mr-3"
+                className="h-8 sm:h-10 w-auto object-contain mr-3"
               />
             )}
-            <h1 className="text-xl font-bold text-white">{room?.name}</h1>
+            <h1 className="text-lg sm:text-xl font-bold text-white">{room?.name}</h1>
           </div>
           
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
             <PointsDisplay 
               points={playerScore} 
-              className="text-white" 
+              className="text-white text-sm sm:text-base" 
               showIcon={true}
             />
             
-            {/* SYNCHRONIZED TIMER DISPLAY */}
-            {timeRemaining !== null && timeRemaining > 0 && (
-              <div className="px-4 py-2 bg-white/20 rounded-full text-white font-mono">
-                <Clock className="w-4 h-4 inline mr-2" />
-                {Math.floor(timeRemaining / 60)}:{(timeRemaining % 60).toString().padStart(2, '0')}
+            {/* MOBILE-OPTIMIZED TIMER DISPLAY - ALWAYS VISIBLE WHEN ACTIVE */}
+            {timeRemaining !== null && timeRemaining >= 0 && (
+              <div className="flex items-center px-3 py-2 bg-white/20 backdrop-blur-sm rounded-full text-white font-mono text-sm sm:text-base border border-white/30">
+                <Clock className="w-4 h-4 mr-2 flex-shrink-0" />
+                <span className="font-bold min-w-[3rem] text-center">
+                  {Math.floor(timeRemaining / 60)}:{(timeRemaining % 60).toString().padStart(2, '0')}
+                </span>
               </div>
             )}
             
-            {/* TIMER FOR POLLS */}
+            {/* TIMER FOR POLLS - MOBILE OPTIMIZED */}
             {currentActivation?.type === 'poll' && currentActivation.time_limit && currentActivation.timer_started_at && (
-              <CountdownTimer 
-                initialSeconds={currentActivation.time_limit}
-                startTime={currentActivation.timer_started_at}
-                variant="small"
-                onComplete={() => {
-                  // Timer completed for poll, but polls don't have showAnswers logic
-                  console.log(`[${debugId}] Poll timer completed`);
-                }}
-              />
+              <div className="flex items-center px-3 py-2 bg-yellow-500/20 backdrop-blur-sm rounded-full text-white font-mono text-sm border border-yellow-500/30">
+                <Clock className="w-4 h-4 mr-2 flex-shrink-0" />
+                <CountdownTimer 
+                  initialSeconds={currentActivation.time_limit}
+                  startTime={currentActivation.timer_started_at}
+                  variant="small"
+                  showIcon={false}
+                  showProgressBar={false}
+                  className="text-yellow-200"
+                  onComplete={() => {
+                    console.log(`[${debugId}] Poll timer completed`);
+                  }}
+                />
+              </div>
             )}
           </div>
         </div>
@@ -704,7 +726,7 @@ export default function Game() {
               </div>
             }
           >
-            <div className="bg-white/10 backdrop-blur-sm rounded-lg shadow-lg p-6">
+            <div className="bg-white/10 backdrop-blur-sm rounded-lg shadow-lg p-4 sm:p-6">
             {currentActivation.type === 'leaderboard' ? (
               <LeaderboardDisplay 
                 roomId={roomId!}
@@ -715,7 +737,7 @@ export default function Game() {
               />
             ) : (
               <>
-                <h2 className="text-2xl font-semibold text-white mb-6 text-center">
+                <h2 className="text-xl sm:text-2xl font-semibold text-white mb-6 text-center">
                   {currentActivation.question}
                 </h2>
                 
@@ -723,7 +745,7 @@ export default function Game() {
                 
                 {/* Multiple Choice */}
                 {currentActivation.type === 'multiple_choice' && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                     {currentActivation.options?.map((option, index) => {
                       const isSelected = option.text === selectedAnswer;
                       const isCorrectAnswer = option.text === currentActivation.correct_answer;
@@ -735,7 +757,7 @@ export default function Game() {
                           key={index}
                           onClick={() => handleMultipleChoiceAnswer(option.text, option.id)}
                           disabled={hasAnswered}
-                          className={`p-4 rounded-lg transition transform hover:scale-105 ${
+                          className={`p-3 sm:p-4 rounded-lg transition transform hover:scale-105 ${
                             hasAnswered
                               ? showCorrect
                                 ? 'bg-green-400/30 ring-2 ring-green-400'
@@ -753,18 +775,18 @@ export default function Game() {
                                 url={option.media_url}
                                 type={option.media_type}
                                 alt={option.text}
-                                className="w-12 h-12 rounded-full object-cover"
+                                className="w-10 h-10 sm:w-12 sm:h-12 rounded-full object-cover flex-shrink-0"
                                 fallbackText="!"
                               />
                             )}
-                            <span className="text-white font-medium text-lg">{option.text}</span>
+                            <span className="text-white font-medium text-base sm:text-lg text-left">{option.text}</span>
                           </div>
                           
                           {showCorrect && (
-                            <CheckCircle className="w-6 h-6 text-green-400 mt-2" />
+                            <CheckCircle className="w-5 h-5 sm:w-6 sm:h-6 text-green-400 mt-2" />
                           )}
                           {showIncorrect && (
-                            <XCircle className="w-6 h-6 text-red-400 mt-2" />
+                            <XCircle className="w-5 h-5 sm:w-6 sm:h-6 text-red-400 mt-2" />
                           )}
                         </button>
                       );
@@ -781,7 +803,7 @@ export default function Game() {
                       onChange={(e) => setTextAnswer(e.target.value)}
                       placeholder="Type your answer here..."
                       disabled={hasAnswered}
-                      className="w-full px-4 py-3 bg-white/20 border border-white/30 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/50"
+                      className="w-full px-4 py-3 bg-white/20 border border-white/30 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/50 text-base"
                     />
                     
                     {!hasAnswered && (
@@ -829,26 +851,26 @@ export default function Game() {
                         <p className="text-xl">Waiting for voting to start...</p>
                       </div>
                     ) : pollState === 'voting' && !pollVoted ? (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                         {currentActivation.options?.map((option, index) => (
                           <button
                             key={index}
                             onClick={() => handlePollVote(option.text, option.id)}
                             disabled={pollVoted || pollLoading}
-                            className="p-4 rounded-lg bg-white/20 hover:bg-white/30 transition transform hover:scale-105 disabled:opacity-50"
+                            className="p-3 sm:p-4 rounded-lg bg-white/20 hover:bg-white/30 transition transform hover:scale-105 disabled:opacity-50"
                           >
                             <div className="flex items-center gap-3">
                               {option.media_type !== 'none' && option.media_url && (
                                 <img
                                   src={getStorageUrl(option.media_url)}
                                   alt={option.text}
-                                  className="w-12 h-12 rounded-full object-cover"
+                                  className="w-10 h-10 sm:w-12 sm:h-12 rounded-full object-cover flex-shrink-0"
                                   onError={(e) => {
                                     e.currentTarget.src = 'https://via.placeholder.com/100?text=!';
                                   }}
                                 />
                               )}
-                              <span className="text-white font-medium text-lg">{option.text}</span>
+                              <span className="text-white font-medium text-base sm:text-lg text-left">{option.text}</span>
                             </div>
                           </button>
                         ))}
@@ -880,12 +902,12 @@ export default function Game() {
           </div>
         )}
         
-        {/* Point Animation - Only show when timer has completed and results are shown */}
-        {showPointAnimation && showAnswers && showResult && (
+        {/* Point Animation - Only show when timer has completed AND results are shown */}
+        {showPointAnimation && showAnswers && showResult && pointsEarned > 0 && (
           <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50">
             <PointAnimation 
               points={pointsEarned} 
-              className="text-4xl"
+              className="text-3xl sm:text-4xl"
             />
           </div>
         )}
