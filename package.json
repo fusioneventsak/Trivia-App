@@ -14,7 +14,6 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.39.8",
     "browser-image-compression": "^2.0.2",
-    "caniuse-lite": "^1.0.30001723",
     "canvas-confetti": "^1.9.3",
     "clsx": "^2.1.0",
     "lucide-react": "^0.344.0",
