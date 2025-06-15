@@ -3,16 +3,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { useGameContext } from '../context/GameContext';
+import { useGameStore } from '../store/gameStore';
 import { useTheme } from '../context/ThemeContext';
 import { Clock, Loader2, AlertCircle } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import PointsDisplay from './ui/PointsDisplay';
 import CountdownTimer from './ui/CountdownTimer';
 import MediaDisplay from './ui/MediaDisplay';
-import LeaderboardDisplay from './LeaderboardDisplay';
-import PollDisplay from './PollDisplay';
-import ErrorBoundary from './ErrorBoundary';
+import LeaderboardDisplay from './ui/LeaderboardDisplay';
+import PollDisplay from './ui/PollDisplay';
+import ErrorBoundary from './ui/ErrorBoundary';
 import NetworkStatus from './ui/NetworkStatus';
 import { usePollManager } from '../hooks/usePollManager';
 
@@ -35,7 +35,7 @@ const Game: React.FC = () => {
     playerScore, 
     setPlayerScore, 
     updatePlayerScore 
-  } = useGameContext();
+  } = useGameStore();
 
   // Core state
   const [room, setRoom] = useState<any>(null);
@@ -431,9 +431,8 @@ const Game: React.FC = () => {
     }
   };
 
-  // Helper functions (assuming these exist in your original code)
+  // Helper functions
   const getTimeBonus = (responseTime: number) => {
-    // Your existing time bonus calculation
     const maxBonus = 50;
     const timeLimit = 30000; // 30 seconds
     return Math.max(0, Math.round(maxBonus * (1 - responseTime / timeLimit)));
@@ -445,9 +444,29 @@ const Game: React.FC = () => {
 
   const updatePlayerScoreInDB = async (points: number, isCorrect: boolean, responseTimeMs: number) => {
     try {
-      // Your existing database update logic
       console.log(`[${debugId}] Updating score in database: +${points} points`);
-      // Implementation details...
+      
+      if (!currentPlayerId) return;
+      
+      // Update player score
+      const { error: updateError } = await supabase
+        .from('players')
+        .update({ 
+          score: playerScore + points,
+          stats: {
+            totalPoints: playerScore + points,
+            correctAnswers: isCorrect ? 1 : 0,
+            totalAnswers: 1,
+            averageResponseTimeMs: responseTimeMs
+          }
+        })
+        .eq('id', currentPlayerId);
+      
+      if (updateError) throw updateError;
+      
+      // Update local state
+      setPlayerScore(playerScore + points);
+      
     } catch (err: any) {
       console.error('Error updating player score:', err);
       setError('Failed to update score');
@@ -456,7 +475,45 @@ const Game: React.FC = () => {
 
   // Fetch room and activation data
   const fetchRoomAndActivation = async () => {
-    // Your existing fetch logic
+    try {
+      setLoading(true);
+      setError(null);
+      
+      if (!roomId) {
+        setError('Room ID is required');
+        return;
+      }
+      
+      // Fetch room data
+      const { data: roomData, error: roomError } = await supabase
+        .from('rooms')
+        .select('*')
+        .eq('id', roomId)
+        .single();
+      
+      if (roomError) throw roomError;
+      setRoom(roomData);
+      
+      // Fetch current activation
+      const { data: activationData, error: activationError } = await supabase
+        .from('activations')
+        .select('*')
+        .eq('room_id', roomId)
+        .eq('active', true)
+        .single();
+      
+      if (activationError && activationError.code !== 'PGRST116') {
+        throw activationError;
+      }
+      
+      setCurrentActivation(activationData);
+      
+    } catch (err: any) {
+      console.error('Error fetching room data:', err);
+      setError(err.message || 'Failed to load room data');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const resetAnswerState = () => {
@@ -485,8 +542,45 @@ const Game: React.FC = () => {
     
     fetchRoomAndActivation();
     
-    // Your existing subscription setup...
-  }, [currentPlayerId, roomId]);
+    // Subscribe to room changes
+    const roomSubscription = supabase
+      .channel(`room-${roomId}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'rooms',
+        filter: `id=eq.${roomId}`
+      }, (payload) => {
+        console.log('Room updated:', payload);
+        if (payload.new) {
+          setRoom(payload.new);
+        }
+      })
+      .subscribe();
+    
+    // Subscribe to activation changes
+    const activationSubscription = supabase
+      .channel(`activations-${roomId}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'activations',
+        filter: `room_id=eq.${roomId}`
+      }, (payload) => {
+        console.log('Activation updated:', payload);
+        if (payload.new && payload.new.active) {
+          setCurrentActivation(payload.new);
+        } else if (payload.old && payload.old.active && !payload.new?.active) {
+          setCurrentActivation(null);
+        }
+      })
+      .subscribe();
+    
+    return () => {
+      roomSubscription.unsubscribe();
+      activationSubscription.unsubscribe();
+    };
+  }, [currentPlayerId, roomId, navigate]);
 
   // Handle activation changes
   useEffect(() => {
@@ -518,7 +612,7 @@ const Game: React.FC = () => {
   // Loading and error states
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-theme-gradient">
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-purple-600 to-blue-600">
         <div className="flex flex-col items-center">
           <Loader2 className="w-12 h-12 text-white animate-spin mb-4" />
           <p className="text-white text-xl">Loading game...</p>
@@ -529,7 +623,7 @@ const Game: React.FC = () => {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-theme-gradient p-4">
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-purple-600 to-blue-600 p-4">
         <div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full text-center">
           <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
           <h1 className="text-2xl font-bold text-gray-800 mb-4">Error</h1>
@@ -554,7 +648,7 @@ const Game: React.FC = () => {
     <div 
       className="min-h-screen p-4 relative"
       style={{ 
-        background: `linear-gradient(to bottom right, ${roomTheme.primary_color}, ${roomTheme.secondary_color})` 
+        background: `linear-gradient(to bottom right, ${roomTheme.primary_color || '#6366F1'}, ${roomTheme.secondary_color || '#8B5CF6'})` 
       }}
     >
       {/* Network status indicator */}
@@ -640,12 +734,22 @@ const Game: React.FC = () => {
             }
           >
             <div className="bg-white/10 backdrop-blur-sm rounded-lg shadow-lg p-4 sm:p-6">
-              {/* Your existing activation rendering logic */}
+              {/* Multiple choice questions */}
               {currentActivation.type === 'multiple_choice' && (
                 <div>
                   <h2 className="text-xl sm:text-2xl font-bold text-white mb-6 text-center">
                     {currentActivation.question}
                   </h2>
+                  
+                  {/* Media display */}
+                  {currentActivation.media_url && (
+                    <div className="mb-6">
+                      <MediaDisplay 
+                        mediaType={currentActivation.media_type}
+                        mediaUrl={currentActivation.media_url}
+                      />
+                    </div>
+                  )}
                   
                   {/* Answer options */}
                   <div className="grid gap-3 sm:gap-4">
@@ -708,6 +812,16 @@ const Game: React.FC = () => {
                     {currentActivation.question}
                   </h2>
                   
+                  {/* Media display */}
+                  {currentActivation.media_url && (
+                    <div className="mb-6">
+                      <MediaDisplay 
+                        mediaType={currentActivation.media_type}
+                        mediaUrl={currentActivation.media_url}
+                      />
+                    </div>
+                  )}
+                  
                   <form onSubmit={handleTextAnswerSubmit}>
                     <input
                       type="text"
@@ -748,7 +862,25 @@ const Game: React.FC = () => {
                 </div>
               )}
               
-              {/* Other activation types... */}
+              {/* Poll type */}
+              {currentActivation.type === 'poll' && (
+                <PollDisplay
+                  activation={currentActivation}
+                  playerId={currentPlayerId}
+                  onVote={submitPollVote}
+                  votes={pollVotes}
+                  totalVotes={totalVotes}
+                  hasVoted={pollVoted}
+                  selectedOptionId={pollSelectedOptionId}
+                  pollState={pollState}
+                  isLoading={pollLoading}
+                />
+              )}
+              
+              {/* Leaderboard type */}
+              {currentActivation.type === 'leaderboard' && (
+                <LeaderboardDisplay roomId={roomId!} />
+              )}
             </div>
           </ErrorBoundary>
         ) : (
