@@ -133,15 +133,15 @@ export default function Game() {
       return true;
     }
     
-    // Has a timer and it has started? Can answer but not reveal results yet
-    if (currentActivation?.time_limit && currentActivation?.timer_started_at) {
-      console.log(`[${debugId}] 🟡 Timer started - can answer but not reveal results until host allows`);
-      return false;
-    }
-    
     // Has a timer but not started? Cannot answer or reveal
     if (currentActivation?.time_limit && !currentActivation?.timer_started_at) {
       console.log(`[${debugId}] 🔴 Timer configured but not started - CANNOT reveal results`);
+      return false;
+    }
+    
+    // Has a timer and it has started? Can answer but not reveal results yet
+    if (currentActivation?.time_limit && currentActivation?.timer_started_at) {
+      console.log(`[${debugId}] 🟡 Timer started - can answer but not reveal results until host allows`);
       return false;
     }
     
@@ -970,7 +970,7 @@ export default function Game() {
         <div className={`${isMobile ? 'fixed top-4 left-4 right-4 z-[9999]' : 'hidden'}`}>
           <div className="flex justify-center">
             <div 
-              className={`bg-red-600 text-white px-6 py-4 rounded-xl shadow-2xl border-4 border-yellow-400`}
+              className={`bg-red-600 text-white px-6 py-4 rounded-xl shadow-2xl border-4 border-yellow-400 animate-pop-in`}
               style={isMobile ? {
                 WebkitTransform: 'translateZ(0)', // Force GPU acceleration on iOS
                 transform: 'translateZ(0)',

@@ -67,11 +67,23 @@ const CountdownTimer: React.FC<CountdownTimerProps> = ({
       const remainingSeconds = Math.ceil(remainingMs / 1000);
       setTimeRemaining(remainingSeconds);
       setProgress((remainingSeconds / duration) * 100);
+      
+      // Force immediate render to avoid flicker
+      requestAnimationFrame(() => {
+        setTimeRemaining(remainingSeconds);
+        setProgress((remainingSeconds / duration) * 100);
+      });
     } else {
       // No start time provided, just use initialSeconds
       setTimeRemaining(duration);
       totalTimeRef.current = duration;
       setProgress(100);
+      
+      // Force immediate render to avoid flicker
+      requestAnimationFrame(() => {
+        setTimeRemaining(duration);
+        setProgress(100);
+      });
     }
     
     // Use requestAnimationFrame for iOS devices to avoid background throttling
@@ -187,7 +199,7 @@ const CountdownTimer: React.FC<CountdownTimerProps> = ({
         {showLabel && <span className="ml-2 font-normal text-sm">remaining</span>}
       </div>
       
-      <div className="w-full mt-2 bg-white/20 rounded-full h-1.5 max-w-[200px]">
+      <div className="w-full mt-2 bg-white/20 rounded-full h-1.5 max-w-[200px] overflow-hidden">
         <div 
           className={cn(
             "h-1.5 rounded-full transition-all duration-1000 ease-linear",

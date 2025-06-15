@@ -97,7 +97,7 @@ const ActivationPreview: React.FC<{ activation: Activation }> = ({ activation })
     // If time limit is set, start the timer
     if (activation.time_limit && activation.time_limit > 0) {
       setTimeRemaining(activation.time_limit);
-      setShowAnswers(activation.show_answers === true);
+      setShowAnswers(false); // Hide answers when timer starts
       
       // Only start countdown if timer_started_at is set
       if (activation.timer_started_at) {

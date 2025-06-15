@@ -120,6 +120,10 @@ export default function Results() {
       };
 
       updateTimer(); // Initial update
+      
+      // Force immediate render to avoid flicker
+      requestAnimationFrame(updateTimer);
+      
       timerIntervalRef.current = setInterval(updateTimer, 1000);
     } else if (currentActivation?.time_limit && !currentActivation?.timer_started_at) {
       // Timer hasn't started yet - show the total time
@@ -500,7 +504,7 @@ export default function Results() {
               {/* Timer display - Enhanced with NaN protection */}
               {currentActivation.time_limit && timeRemaining !== null && !isNaN(timeRemaining) && (
                 <div className="flex justify-center mb-6">
-                  <div className="bg-white/20 px-6 py-3 rounded-lg shadow-lg">
+                  <div className="bg-white/20 px-6 py-3 rounded-lg shadow-lg animate-pop-in">
                     {currentActivation.timer_started_at && !currentActivation.show_answers ? (
                       <CountdownTimer 
                         duration={timeRemaining} 
