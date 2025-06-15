@@ -137,7 +137,7 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
           const optionId = option.id || option.text;
           const voteCount = votes[optionId] || 0;
           const percentage = totalVotes > 0 ? (voteCount / totalVotes * 100) : 0;
-          realWidths[optionId] = Math.max(percentage, 4); // Minimum 4% for visibility
+          realWidths[optionId] = Math.max(percentage, voteCount > 0 ? 4 : 0); // Minimum 4% for visibility if there are votes
         });
         
         // Animate from random widths to real widths
@@ -232,11 +232,11 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
             );
           }
           
-          // Animate bar widths
+          // Animate bar widths with actual percentages for closed polls
           const percentage = totalVotes > 0 ? ((votes[optionId] || 0) / totalVotes * 100) : 0;
           setBarWidths(prev => ({
             ...prev,
-            [optionId]: Math.max(percentage, 4) // Minimum 4% for visibility
+            [optionId]: Math.max(percentage, (votes[optionId] || 0) > 0 ? 4 : 0) // Minimum 4% for visibility if there are votes
           }));
         },
         100 // 100ms stagger between each option
@@ -305,11 +305,21 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
     return selectedAnswer === option.text;
   };
 
-  // Determine which width to use based on poll state
-  const getBarWidth = (optionId: string): number => {
+  // Determine which width to use based on poll state - FIXED FOR LOCKED POLLS
+  const getBarWidth = (option: PollOption): number => {
+    const optionId = option.id || option.text;
+    
     if (pollState === 'voting' && !showOptionsOnly) {
       return randomBarWidths[optionId] || 50;
     }
+    
+    // For closed/locked polls, calculate actual percentage from vote counts
+    if (pollState === 'closed') {
+      const voteCount = getVoteCount(option);
+      const percentage = animatedTotalVotes > 0 ? (voteCount / animatedTotalVotes * 100) : 0;
+      return Math.max(percentage, voteCount > 0 ? 4 : 0); // Minimum 4% for visibility if there are votes
+    }
+    
     return barWidths[optionId] || 0;
   };
 
@@ -396,8 +406,7 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
           const percentage = animatedTotalVotes > 0 ? (voteCount / animatedTotalVotes * 100) : 0;
           const isSelected = isOptionSelected(option);
           const isLeading = pollState === 'closed' && (option.id === leadingOptionId || option.text === leadingOptionId);
-          const optionId = option.id || option.text;
-          const barWidth = getBarWidth(optionId);
+          const barWidth = getBarWidth(option); // UPDATED to pass the option object
           
           return (
             <div key={index} className={cn(
