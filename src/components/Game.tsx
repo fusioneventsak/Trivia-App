@@ -115,8 +115,9 @@ export default function Game() {
   } = usePollManager({
     activationId: currentActivation?.id || null,
     options: currentActivation?.options,
-    playerId: currentPlayerId,
-    roomId: room?.id || null
+    playerId: currentPlayerId || null,
+    roomId: room?.id || null,
+    debugMode: false
   });
 
   // CRITICAL FIX: Enhanced result revelation logic - STRICT iPhone enforcement

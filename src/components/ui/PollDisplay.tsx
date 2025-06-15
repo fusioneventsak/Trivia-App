@@ -24,7 +24,7 @@ interface PollDisplayProps {
   selectedAnswer?: string | null;
   selectedOptionId?: string | null;
   getStorageUrl?: (url: string) => string;
-  themeColors?: {
+  themeColors?: any;
     primary_color?: string;
     secondary_color?: string;
   };
@@ -269,8 +269,8 @@ const PollDisplay: React.FC<PollDisplayProps> = ({
   // Helper to get color for each option
   const getColorForIndex = (index: number) => {
     const baseColors = [
-      themeColors.primary_color || '#3B82F6',
-      themeColors.secondary_color || '#8B5CF6',
+      themeColors?.primary_color || '#3B82F6',
+      themeColors?.secondary_color || '#8B5CF6',
       '#10B981', // Green
       '#F59E0B', // Yellow
       '#EF4444', // Red

@@ -28,6 +28,7 @@ interface UsePollManagerProps {
   options?: PollOption[];
   playerId?: string | null;
   roomId?: string | null;
+  roomId?: string | null;
   debugMode?: boolean;
 }
 
@@ -49,6 +50,7 @@ export function usePollManager({
   activationId, 
   options = [], 
   playerId,
+  roomId,
   roomId,
   debugMode = false
 }: UsePollManagerProps): UsePollManagerReturn {
@@ -77,9 +79,9 @@ export function usePollManager({
   const initializePoll = useCallback(async () => {
     if (!activationId) return;
     
-   if (debugMode) {
-     console.log(`[${debugIdRef.current}] Initializing poll for activation: ${activationId}, player: ${playerId || 'none'}, interval: ${pollingInterval}ms`);
-   }
+    if (debugMode) {
+      console.log(`[${debugIdRef.current}] Initializing poll for activation: ${activationId}, player: ${playerId || 'none'}, room: ${roomId || 'none'}, interval: ${pollingInterval}ms`);
+    }
    
     // Force poll state update from database
     try {
@@ -104,7 +106,7 @@ export function usePollManager({
     }
     
     if (debugMode) {
-      console.log(`[${debugIdRef.current}] Initializing poll for activation: ${activationId}, player: ${playerId || 'none'}, interval: ${pollingInterval}ms`);
+      console.log(`[${debugIdRef.current}] Initializing poll for activation: ${activationId}, player: ${playerId || 'none'}, room: ${roomId || 'none'}, interval: ${pollingInterval}ms`);
     }
     
     // Don't fetch too frequently (throttle to once per second)
@@ -267,7 +269,7 @@ export function usePollManager({
     } finally {
       setIsLoading(false);
     }
-  }, [activationId, options, playerId, pollingInterval, debugMode]);
+  }, [activationId, options, playerId, roomId, pollingInterval, debugMode]);
 
   // Reset poll state
   const resetPoll = useCallback(() => {

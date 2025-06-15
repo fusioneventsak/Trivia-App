@@ -3,7 +3,8 @@ import { Clock } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 interface CountdownTimerProps {
-  duration: number;
+  duration?: number;
+  timeRemaining?: number;
   startTime?: string;
   onComplete?: () => void;
   className?: string;
@@ -14,6 +15,7 @@ interface CountdownTimerProps {
 
 const CountdownTimer: React.FC<CountdownTimerProps> = ({
   duration,
+  timeRemaining: initialTimeRemaining,
   startTime,
   onComplete,
   className,
@@ -21,11 +23,11 @@ const CountdownTimer: React.FC<CountdownTimerProps> = ({
   showIcon = true,
   showLabel = false,
 }) => {
-  const [timeRemaining, setTimeRemaining] = useState<number>(duration);
+  const [timeRemaining, setTimeRemaining] = useState<number>(initialTimeRemaining || duration || 0);
   const [progress, setProgress] = useState<number>(100);
   const [isComplete, setIsComplete] = useState<boolean>(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const totalTimeRef = useRef<number>(duration);
+  const totalTimeRef = useRef<number>(duration || initialTimeRemaining || 0);
   const [isMobile, setIsMobile] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
   
@@ -46,7 +48,7 @@ const CountdownTimer: React.FC<CountdownTimerProps> = ({
     }
     
     // If we have a start time, calculate the remaining time based on that
-    if (startTime) {
+    if (startTime && duration) {
       const startTimeMs = new Date(startTime).getTime();
       const currentTimeMs = new Date().getTime();
       const elapsedMs = currentTimeMs - startTimeMs;
@@ -65,7 +67,7 @@ const CountdownTimer: React.FC<CountdownTimerProps> = ({
       // Calculate remaining time
       const remainingMs = totalTimeMs - elapsedMs;
       const remainingSeconds = Math.ceil(remainingMs / 1000);
-      setTimeRemaining(remainingSeconds);
+      setTimeRemaining(Math.max(0, remainingSeconds));
       setProgress((remainingSeconds / duration) * 100);
       
       // Force immediate render to avoid flicker
@@ -73,6 +75,11 @@ const CountdownTimer: React.FC<CountdownTimerProps> = ({
         setTimeRemaining(remainingSeconds);
         setProgress((remainingSeconds / duration) * 100);
       });
+    } else if (initialTimeRemaining !== undefined) {
+      // If we have an initial time remaining, use that
+      setTimeRemaining(initialTimeRemaining);
+      totalTimeRef.current = initialTimeRemaining;
+      setProgress(100); // Start at 100%
     }
     
     // Use requestAnimationFrame for iOS devices to avoid background throttling
@@ -140,7 +147,7 @@ const CountdownTimer: React.FC<CountdownTimerProps> = ({
     
     // Cleanup on unmount
     return () => {
-      if (intervalId) {
+      if (intervalId && typeof intervalId === 'number') {
         clearInterval(intervalId);
       }
       window.removeEventListener('resize', checkMobile);
@@ -148,7 +155,7 @@ const CountdownTimer: React.FC<CountdownTimerProps> = ({
   }, [duration, startTime, onComplete, isIOS]);
   
   // Format time as MM:SS
-  const formatTime = (seconds: number): string => {
+  const formatTime = (seconds: number | null): string => {
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = seconds % 60;
     return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
@@ -164,7 +171,7 @@ const CountdownTimer: React.FC<CountdownTimerProps> = ({
   // Determine color based on remaining time
   const getColorClass = () => {
     const percentage = (timeRemaining / totalTimeRef.current) * 100;
-    if (percentage <= 25) return 'bg-red-500/30';
+    if (percentage <= 25 || timeRemaining <= 10) return 'bg-red-500/30';
     if (percentage <= 50) return 'bg-yellow-500/30';
     return 'bg-green-500/30';
   };
@@ -178,7 +185,7 @@ const CountdownTimer: React.FC<CountdownTimerProps> = ({
           sizeClasses[size],
           className
         )}
-      >
+      > 
         {showIcon && <Clock className={cn("mr-2", {
           'w-3 h-3': size === 'sm',
           'w-5 h-5': size === 'md',
@@ -191,7 +198,7 @@ const CountdownTimer: React.FC<CountdownTimerProps> = ({
       <div className="w-full mt-2 bg-white/20 rounded-full h-1.5 max-w-[200px] overflow-hidden">
         <div 
           className={cn(
-            "h-1.5 rounded-full transition-all duration-1000 ease-linear",
+            "h-1.5 rounded-full transition-all duration-500 ease-linear",
             isComplete ? "bg-red-500" : timeRemaining / totalTimeRef.current <= 0.25 ? "bg-red-500" : timeRemaining / totalTimeRef.current <= 0.5 ? "bg-yellow-500" : "bg-green-500"
           )}
           style={{ width: `${progress}%` }}
