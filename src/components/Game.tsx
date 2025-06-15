@@ -290,7 +290,7 @@ export default function Game() {
         setTimeRemaining(0);
         setHasActiveTimer(false);
         setTimerExpired(true);
-        setShowAnswers(true);
+        setShowAnswers(activation.show_answers === true); // Only show answers if host has revealed them
         return;
       }
       
@@ -342,7 +342,7 @@ export default function Game() {
               setTimeRemaining(0);
               setHasActiveTimer(false);
               setTimerExpired(true);
-              setShowAnswers(true);
+              setShowAnswers(activation.show_answers === true); // Only show answers if host has revealed them
               
               return {
                 ...prevState,

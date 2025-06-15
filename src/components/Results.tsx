@@ -108,7 +108,9 @@ export default function Results() {
         setTimeRemaining(remainingSeconds);
 
         if (remaining <= 0) {
-          // Timer expired but wait for host to reveal answers
+          // Timer expired - don't automatically show answers, wait for host
+          setShowAnswers(currentActivation.show_answers === true);
+          
           if (timerIntervalRef.current) {
             clearInterval(timerIntervalRef.current);
           }

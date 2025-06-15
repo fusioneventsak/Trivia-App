@@ -678,9 +678,9 @@ const ActivationPreview: React.FC<{ activation: Activation }> = ({ activation })
           {activation.time_limit && (
             <div className="mb-2 flex justify-center">
               <CountdownTimer 
-                initialSeconds={activation.time_limit}
+                duration={activation.time_limit}
                 startTime={activation.timer_started_at}
-                variant="default"
+                size="md"
                 onComplete={() => setShowAnswers(true)}
               />
             </div>
@@ -780,9 +780,9 @@ const ActivationPreview: React.FC<{ activation: Activation }> = ({ activation })
               {activation.time_limit && (
                 <div className="mb-4 flex justify-center">
                   <CountdownTimer 
-                    initialSeconds={activation.time_limit}
+                    duration={activation.time_limit}
                     startTime={activation.timer_started_at}
-                    variant="default"
+                    size="md"
                     onComplete={() => setShowAnswers(true)}
                   />
                 </div>
@@ -839,9 +839,9 @@ const ActivationPreview: React.FC<{ activation: Activation }> = ({ activation })
             {activation.time_limit && (
               <div className="mb-4 flex justify-center">
                 <CountdownTimer 
-                  initialSeconds={activation.time_limit}
+                  duration={activation.time_limit}
                   startTime={activation.timer_started_at}
-                  variant="default"
+                  size="md"
                   onComplete={() => setPollVoted(true)}
                 />
               </div>

@@ -456,19 +456,22 @@ export default function MobileController() {
         throw new Error('Activation not found');
       }
       
-      // If timer isn't started yet, start it
-      if (!activation.timer_started_at && activation.time_limit) {
+      // If timer isn't started yet, start it and set show_answers to false
+      if (!activation.timer_started_at) {
         // Start the timer
         const { error: updateError } = await supabase
           .from('activations')
-          .update({ timer_started_at: new Date().toISOString() })
+          .update({ 
+            timer_started_at: new Date().toISOString(),
+            show_answers: false  // Explicitly set to false when starting timer
+          })
           .eq('id', currentActivation);
           
         if (updateError) throw updateError;
         
         setSuccessMessage('Timer started!');
         setTimeout(() => setSuccessMessage(null), 3000);
-      } else if (activation.timer_started_at) {
+      } else if (activation.timer_started_at && !activation.show_answers) {
         // Timer is already running - reveal answers immediately
         const { error: updateError } = await supabase
           .from('activations')
@@ -479,6 +482,20 @@ export default function MobileController() {
         
         const actionType = activation.type === 'poll' ? 'Results' : 'Answers';
         setSuccessMessage(`${actionType} revealed!`);
+        setTimeout(() => setSuccessMessage(null), 3000);
+      } else if (activation.timer_started_at && activation.show_answers) {
+        // Reset timer and hide answers
+        const { error: updateError } = await supabase
+          .from('activations')
+          .update({ 
+            timer_started_at: null,
+            show_answers: false
+          })
+          .eq('id', currentActivation);
+          
+        if (updateError) throw updateError;
+        
+        setSuccessMessage('Timer reset!');
         setTimeout(() => setSuccessMessage(null), 3000);
       } else {
         // No timer set up for this activation

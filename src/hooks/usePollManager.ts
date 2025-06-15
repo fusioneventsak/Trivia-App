@@ -27,6 +27,7 @@ interface UsePollManagerProps {
   activationId: string | null;
   options?: PollOption[];
   playerId?: string | null;
+  roomId?: string | null;
   debugMode?: boolean;
 }
 
@@ -48,6 +49,7 @@ export function usePollManager({
   activationId, 
   options = [], 
   playerId,
+  roomId,
   debugMode = false
 }: UsePollManagerProps): UsePollManagerReturn {
   const [votes, setVotes] = useState<PollVoteCount>({});
