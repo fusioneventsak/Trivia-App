@@ -56,7 +56,7 @@ export default function Game() {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
   const { theme } = useTheme();
-  const { currentPlayerId, addPlayer, updatePlayerScore, getCurrentPlayer } = useGameStore();
+  const { currentPlayerId, setCurrentPlayerId, addPlayer, updatePlayerScore, getCurrentPlayer } = useGameStore();
   
   // Core state
   const [currentActivation, setCurrentActivation] = useState<Activation | null>(null);
