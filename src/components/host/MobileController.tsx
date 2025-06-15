@@ -731,9 +731,21 @@ export default function MobileController() {
             <button
               onClick={manageTimer}
               disabled={loading}
-              className="flex flex-col items-center justify-center p-4 bg-blue-600 text-white rounded-lg shadow-lg disabled:opacity-50 relative overflow-hidden"
+              className={`flex flex-col items-center justify-center p-4 text-white rounded-lg shadow-lg disabled:opacity-50 relative overflow-hidden ${
+                !currentActivation?.timer_started_at 
+                  ? 'bg-blue-600' 
+                  : currentActivation?.show_answers 
+                    ? 'bg-purple-600' 
+                    : 'bg-green-600'
+              }`}
             >
-              <div className="absolute inset-0 bg-gradient-to-r from-blue-600 to-indigo-600"></div>
+              <div className={`absolute inset-0 bg-gradient-to-r ${
+                !currentActivation?.timer_started_at 
+                  ? 'from-blue-600 to-indigo-600' 
+                  : currentActivation?.show_answers 
+                    ? 'from-purple-600 to-purple-800' 
+                    : 'from-green-600 to-green-800'
+              }`}></div>
               <div className="relative z-10">
                 <Clock className="w-8 h-8 mb-2" />
                 <div className="text-center">
