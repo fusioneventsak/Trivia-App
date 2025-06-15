@@ -576,5 +576,3 @@ export function usePollManager({
     resetPoll
   };
 }
-
-export default usePollManager
