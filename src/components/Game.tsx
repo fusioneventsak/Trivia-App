@@ -787,7 +787,8 @@ export default function Game() {
     return () => {
       if (timerIntervalRef.current) {
         // Check if it's a requestAnimationFrame ID
-        if (typeof timerIntervalRef.current === 'object' && timerIntervalRef.current.ref === 'raf') {
+        if (typeof timerIntervalRef.current === 'object' && timerInterval
+Ref.current.ref === 'raf') {
           cancelAnimationFrame(timerIntervalRef.current[Symbol.toPrimitive]());
         } else {
           clearInterval(timerIntervalRef.current);
@@ -950,16 +951,17 @@ export default function Game() {
             {/* Timer */}
             {currentActivation.time_limit && (
               <div className="mb-6">
-                <CountdownTimer
-                  timeRemaining={timeRemaining}
-                  totalTime={currentActivation.time_limit}
-                  isActive={hasActiveTimer}
-                  onExpire={() => {
-                    console.log(`[${debugId}] Timer expired callback triggered`);
-                    setTimerExpired(true);
-                    setHasActiveTimer(false);
-                  }}
-                />
+                {timeRemaining !== null && (
+                  <CountdownTimer
+                    timeRemaining={timeRemaining}
+                    duration={currentActivation.time_limit}
+                    onComplete={() => {
+                      console.log(`[${debugId}] Timer expired callback triggered`);
+                      setTimerExpired(true);
+                      setHasActiveTimer(false);
+                    }}
+                  />
+                )}
               </div>
             )}
 
