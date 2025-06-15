@@ -800,4 +800,166 @@ export default function Results() {
                       {showAnswers && (
                         <div className="bg-green-400/30 p-4 rounded-xl">
                           <div className="font-medium text-white mb-1">Correct Answer:</div>
-                          <div className="text
+                          <div className="text-xl font-bold text-white">{currentActivation.exact_answer}</div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
+                  {/* Poll Display */}
+                  {currentActivation.type === 'poll' && (
+                    <div className="space-y-4">
+                      <PollDisplay
+                        activation={currentActivation}
+                        votes={pollVotes}
+                        totalVotes={totalVotes}
+                        showResults={pollState === 'closed'}
+                        displayType={currentActivation.poll_display_type || 'bar'}
+                        resultFormat={currentActivation.poll_result_format || 'both'}
+                      />
+                      
+                      <div className="flex justify-center">
+                        <PollStateIndicator 
+                          state={pollState || 'pending'}
+                          totalVotes={totalVotes}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          ) : (
+            /* Waiting for next question */
+            <div className="bg-white/10 backdrop-blur-sm rounded-lg shadow-sm p-8 mb-6 text-center">
+              <Clock className="w-16 h-16 text-white/60 mx-auto mb-4" />
+              <h2 className="text-xl font-semibold text-white mb-2">Waiting for next question...</h2>
+              <p className="text-white/80">The host will activate the next question shortly.</p>
+            </div>
+          )}
+        </ErrorBoundary>
+        
+        {/* QR Code and Join Info */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+          {/* QR Code */}
+          <div className="bg-white/10 backdrop-blur-sm rounded-lg shadow-sm p-6 text-center">
+            <h3 className="text-lg font-semibold text-white mb-4">Join This Room</h3>
+            <QRCodeDisplay 
+              url={getJoinUrl()}
+              size={isMobile ? 120 : 150}
+              className="mx-auto mb-4"
+            />
+            <p className="text-white/80 text-sm">
+              Scan QR code or visit:<br />
+              <span className="font-mono text-white">{window.location.origin}/join</span><br />
+              Room Code: <span className="font-bold text-white">{room.room_code}</span>
+            </p>
+          </div>
+          
+          {/* Room Stats */}
+          <div className="bg-white/10 backdrop-blur-sm rounded-lg shadow-sm p-6">
+            <h3 className="text-lg font-semibold text-white mb-4">Room Statistics</h3>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Users className="w-5 h-5 text-white/60" />
+                  <span className="text-white/80">Players</span>
+                </div>
+                <span className="text-white font-semibold">{players.length}</span>
+              </div>
+              
+              {players.length > 0 && (
+                <>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Trophy className="w-5 h-5 text-white/60" />
+                      <span className="text-white/80">Top Score</span>
+                    </div>
+                    <span className="text-white font-semibold">{Math.max(...players.map(p => p.score))}</span>
+                  </div>
+                  
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="w-5 h-5 text-center text-white/60">📊</span>
+                      <span className="text-white/80">Average Score</span>
+                    </div>
+                    <span className="text-white font-semibold">
+                      {Math.round(players.reduce((sum, p) => sum + p.score, 0) / players.length)}
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+        
+        {/* Current Leaderboard */}
+        {players.length > 0 && (
+          <div className="bg-white/10 backdrop-blur-sm rounded-lg shadow-sm p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-white">Current Standings</h3>
+              <button
+                onClick={() => setActivationRefreshCount(prev => prev + 1)}
+                className="p-2 text-white/60 hover:text-white transition"
+                title="Refresh"
+              >
+                <RefreshCw className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-2">
+              {players.slice(0, 10).map((player, index) => (
+                <div
+                  key={player.id}
+                  className={`flex items-center justify-between p-3 rounded-lg transition ${
+                    index < 3 
+                      ? 'bg-gradient-to-r from-yellow-400/20 to-yellow-600/20' 
+                      : 'bg-white/5'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
+                      index === 0 ? 'bg-yellow-400 text-yellow-900' :
+                      index === 1 ? 'bg-gray-300 text-gray-800' :
+                      index === 2 ? 'bg-amber-600 text-white' :
+                      'bg-white/20 text-white'
+                    }`}>
+                      {index + 1}
+                    </div>
+                    <span className="text-white font-medium">{player.name}</span>
+                  </div>
+                  <div className="text-white font-bold">{player.score}</div>
+                </div>
+              ))}
+            </div>
+            
+            {players.length > 10 && (
+              <div className="mt-4 text-center">
+                <span className="text-white/60 text-sm">
+                  ... and {players.length - 10} more players
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+        
+        {/* Debug Info */}
+        {debugMode && (
+          <div className="mt-6 bg-black/50 backdrop-blur-sm rounded-lg p-4 text-xs text-white/80 font-mono">
+            <div className="mb-2 font-bold">Debug Info ({debugIdRef.current}):</div>
+            <div>Room ID: {room?.id}</div>
+            <div>Current Activation: {currentActivation?.id || 'None'}</div>
+            <div>Activation Type: {currentActivation?.type || 'None'}</div>
+            <div>Show Answers: {showAnswers.toString()}</div>
+            <div>Time Remaining: {timeRemaining}</div>
+            <div>Poll State: {pollState || 'N/A'}</div>
+            <div>Poll Votes: {totalVotes}</div>
+            <div>Players: {players.length}</div>
+            <div>Network Error: {networkError.toString()}</div>
+            <div>Refresh Count: {activationRefreshCount}</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
