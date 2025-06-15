@@ -89,14 +89,14 @@ const ActivationPreview: React.FC<{ activation: Activation }> = ({ activation })
   useEffect(() => {
     // Reset states
     setTimeRemaining(null);
-    setShowAnswers(activation.show_answers !== false);
+    setShowAnswers(activation.show_answers === true); // Only show answers if explicitly allowed
     setHasAnswered(false);
     setShowResult(false);
     setPollState(activation.poll_state || 'pending');
     
     // If time limit is set, start the timer
     if (activation.time_limit && activation.time_limit > 0) {
-      setShowAnswers(false); // Hide answers when timer starts
+      setShowAnswers(activation.show_answers === true); // Only show answers if explicitly allowed
       
       // Only start countdown if timer_started_at is set
       if (activation.timer_started_at) {
@@ -108,7 +108,7 @@ const ActivationPreview: React.FC<{ activation: Activation }> = ({ activation })
         // If timer has already expired
         if (elapsedMs >= totalTimeMs) {
           setTimeRemaining(0);
-          setShowAnswers(activation.show_answers !== false);
+          setShowAnswers(activation.show_answers === true); // Only show answers if explicitly allowed
           return;
         }
         
@@ -122,7 +122,7 @@ const ActivationPreview: React.FC<{ activation: Activation }> = ({ activation })
           setTimeRemaining(prev => {
             if (prev === null || prev <= 1) {
               clearInterval(timer);
-              setShowAnswers(activation.show_answers !== false);
+              setShowAnswers(activation.show_answers === true); // Only show answers if explicitly allowed
               return 0;
             }
             return prev - 1;

@@ -123,8 +123,9 @@ export default function Game() {
   const canRevealResults = () => {
     // No timer at all? Can reveal immediately
     if (!currentActivation?.time_limit) {
-      console.log(`[${debugId}] 🟢 No timer configured - can reveal results immediately`);
-      return true;
+      // CRITICAL: Even with no timer, only reveal if host has explicitly allowed it
+      console.log(`[${debugId}] 🟡 No timer configured - but still need host permission to reveal`);
+      return currentActivation?.show_answers === true;
     }
     
     // CRITICAL: Check if host has explicitly revealed answers
@@ -211,7 +212,7 @@ export default function Game() {
     setTimeRemaining(null);
     setHasActiveTimer(false);
     setTimerExpired(false);
-    setShowAnswers(activation.show_answers === true); // Respect show_answers from host
+    setShowAnswers(false); // Always start with answers hidden
     setShowResult(false);
     setShowPointAnimation(false);
     setPendingPoints(0);
@@ -222,7 +223,7 @@ export default function Game() {
     // If no time limit, no timer needed
     if (!activation.time_limit) {
       console.log(`[${debugId}] ❌ No time limit - no timer needed`);
-      setShowAnswers(activation.show_answers !== false);
+      setShowAnswers(activation.show_answers === true); // Only show if explicitly allowed
       return;
     }
     
@@ -273,7 +274,7 @@ export default function Game() {
         setTimeRemaining(0);
         setHasActiveTimer(false);
         setTimerExpired(true);
-        setShowAnswers(activation.show_answers === true); // Only show answers if host has revealed them
+        setShowAnswers(false); // Never show answers automatically
         return;
       }
       
@@ -325,7 +326,7 @@ export default function Game() {
               setTimeRemaining(0);
               setHasActiveTimer(false);
               setTimerExpired(true);
-              setShowAnswers(activation.show_answers === true); // Only show answers if host has revealed them
+              setShowAnswers(false); // Never show answers automatically
               
               return {
                 ...prevState,
@@ -573,10 +574,11 @@ export default function Game() {
   // CRITICAL FIX: Watch for timer expiration OR host reveal to show results
   useEffect(() => {
     // Only reveal results if host has set show_answers = true
-    if (currentActivation?.show_answers === true && hasAnswered && !showResult && 
+    if (currentActivation?.show_answers === true && hasAnswered && 
         (currentActivation?.type === 'multiple_choice' || currentActivation?.type === 'text_answer')) {
       console.log(`[${debugId}] 🎉 Host revealed answers - showing results and points!`);
       setShowResult(true);
+      setShowAnswers(true);
       
       // Award pending points if we have them
       if (hasPendingReward) {

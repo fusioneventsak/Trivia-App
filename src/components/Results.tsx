@@ -551,13 +551,12 @@ export default function Results() {
                   {renderQuestionMedia()}
 
                   {/* Multiple choice options */}
-                  {currentActivation.type === 'multiple_choice' && currentActivation.show_answers === true && (
+                  {currentActivation.type === 'multiple_choice' && (
                     <div className="max-w-3xl mx-auto space-y-4">
                       {currentActivation.options?.map((option, index) => (
                         <div 
                           key={index}
-                          className={`p-6 rounded-lg border-2 transition-all ${
-                            option.text === currentActivation.correct_answer
+                          className={`p-6 rounded-lg border-2 transition-all ${currentActivation.show_answers === true && option.text === currentActivation.correct_answer
                               ? 'bg-green-500/20 border-green-400 text-white'
                               : 'bg-white/10 border-white/20 text-white/70'
                           }`}
@@ -571,7 +570,7 @@ export default function Results() {
                               />
                             )}
                             <span className="text-xl font-medium">{option.text}</span>
-                            {option.text === currentActivation.correct_answer && (
+                            {currentActivation.show_answers === true && option.text === currentActivation.correct_answer && (
                               <span className="ml-auto text-green-400 font-bold text-xl">✓ Correct</span>
                             )}
                           </div>
@@ -608,7 +607,7 @@ export default function Results() {
                   )}
 
                   {/* Waiting for answers - only show if timer is running but answers not revealed */}
-                  {currentActivation.show_answers === false && currentActivation.type !== 'poll' && (
+                  {(currentActivation.show_answers !== true && currentActivation.type !== 'poll') && (
                     <div className="text-center py-12">
                       <Clock className="w-16 h-16 text-white/50 mx-auto mb-4" />
                       <p className="text-white/70 text-xl">
