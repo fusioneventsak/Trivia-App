@@ -1,4 +1,3 @@
-// src/components/Game.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
@@ -77,7 +76,7 @@ export default function Game() {
   const [showNetworkStatus, setShowNetworkStatus] = useState(false);
 
   // CRITICAL FIX: Consolidated timer state
-  const [timerState, setTimerState] = useState<any>({
+  const [timerState, setTimerState] = useState<TimerState>({
     isActive: false,
     timeRemaining: null,
     hasExpired: false,
@@ -116,58 +115,61 @@ export default function Game() {
   } = usePollManager({
     activationId: currentActivation?.id || null,
     options: currentActivation?.options,
-    playerId: currentPlayerId
+    playerId: currentPlayerId,
+    roomId: room?.id || null
   });
 
-  // CRITICAL FIX: Enhanced result revelation logic
+  // CRITICAL FIX: Enhanced result revelation logic - STRICT iPhone enforcement
   const canRevealResults = () => {
-    // If there's no timer configured, can show immediately
+    // No timer at all? Can reveal immediately
     if (!currentActivation?.time_limit) {
       console.log(`[${debugId}] 🟢 No timer configured - can reveal results immediately`);
       return true;
     }
     
-    // If timer has explicitly expired, can show
-    if (timerState.hasExpired || timerExpired) {
-      console.log(`[${debugId}] 🟢 Timer expired - can reveal results now`);
-      return true;
+    // Has a timer but not started? Cannot reveal
+    if (currentActivation?.time_limit && !currentActivation?.timer_started_at) {
+      console.log(`[${debugId}] 🔴 Timer configured but not started - CANNOT reveal results`);
+      return false;
     }
     
-    // If timer hasn't started yet, can show
-    if (!timerState.startedAt && !currentActivation?.timer_started_at) {
-      console.log(`[${debugId}] 🟢 Timer not started - can reveal results immediately`);
-      return true;
+    // CRITICAL: Check both timer states for maximum safety
+    const timerActive = timerState.isActive || hasActiveTimer;
+    const timerExpiredFlag = timerState.hasExpired || timerExpired;
+    
+    // If timer is still active, NEVER reveal results
+    if (timerActive && !timerExpiredFlag) {
+      console.log(`[${debugId}] 🔴 Timer still active - CANNOT reveal results (iPhone protection)`);
+      return false;
     }
     
-    // Double-check timer expiration using server time
+    // Double-check timer expiration using server time (most reliable for iPhone)
     if (currentActivation?.timer_started_at && currentActivation?.time_limit) {
       const startTime = new Date(currentActivation.timer_started_at).getTime();
-      const currentTime = new Date().getTime();
+      const currentTime = Date.now();
       const elapsedMs = currentTime - startTime;
       const totalTimeMs = currentActivation.time_limit * 1000;
       
-      if (elapsedMs >= totalTimeMs) {
-        console.log(`[${debugId}] 🟢 Timer should have expired (server time check) - can reveal results`);
-        // Update state to reflect expiration
-        setTimerState(prev => ({ ...prev, hasExpired: true }));
-        setTimerExpired(true);
-        return true;
-      }
+      const serverTimeExpired = elapsedMs >= totalTimeMs;
+      
+      console.log(`[${debugId}] ⏱️ Server time check:`, {
+        elapsed: Math.floor(elapsedMs / 1000),
+        total: currentActivation.time_limit,
+        expired: serverTimeExpired
+      });
+      
+      // CRITICAL: For iPhone, ONLY trust server time calculation
+      return serverTimeExpired;
     }
     
-    // Check if time remaining is 0
-    if (timerState.timeRemaining === 0 || timeRemaining === 0) {
-      console.log(`[${debugId}] 🟢 Time remaining is 0 - can reveal results`);
+    // If we have explicit expiration flags, trust them
+    if (timerExpiredFlag) {
+      console.log(`[${debugId}] 🟢 Timer explicitly expired - can reveal results`);
       return true;
     }
     
-    console.log(`[${debugId}] 🔴 Timer active - CANNOT reveal results`, {
-      timerActive: timerState.isActive,
-      timerExpired: timerState.hasExpired,
-      timeRemaining: timerState.timeRemaining,
-      legacyActive: hasActiveTimer,
-      legacyExpired: timerExpired
-    });
+    // Default to NOT revealing if unsure (safer for iPhone)
+    console.log(`[${debugId}] 🔴 Default denial - CANNOT reveal results`);
     return false;
   };
 
@@ -201,13 +203,15 @@ export default function Game() {
     };
   }, [debugId]);
 
-  // CRITICAL FIX: Enhanced timer setup with better state management
+  // CRITICAL FIX: Enhanced timer setup with iOS-specific handling
   const setupTimer = (activation: Activation) => {
     console.log(`[${debugId}] 🔧 Setting up timer:`, {
       id: activation.id,
       time_limit: activation.time_limit,
       timer_started_at: activation.timer_started_at,
-      type: activation.type
+      type: activation.type,
+      isMobile,
+      isIOS: /iPhone|iPad|iPod/.test(navigator.userAgent)
     });
     
     // Clear any existing timer
@@ -216,7 +220,7 @@ export default function Game() {
       timerIntervalRef.current = null;
     }
     
-    // Reset all timer and answer states
+    // Reset ALL states to ensure clean slate
     setTimerState({
       isActive: false,
       timeRemaining: null,
@@ -225,7 +229,7 @@ export default function Game() {
       totalTime: null
     });
     
-    // Legacy state updates for compatibility
+    // Legacy state resets
     setTimeRemaining(null);
     setHasActiveTimer(false);
     setTimerExpired(false);
@@ -247,13 +251,13 @@ export default function Game() {
     // Check if timer has already started
     if (activation.timer_started_at) {
       const startTime = new Date(activation.timer_started_at).getTime();
-      const currentTime = new Date().getTime();
+      const currentTime = Date.now();
       const elapsedMs = currentTime - startTime;
       const totalTimeMs = activation.time_limit * 1000;
       
       console.log(`[${debugId}] ⏱️ Timer calculation:`, {
         startTime: new Date(activation.timer_started_at).toISOString(),
-        currentTime: new Date().toISOString(),
+        currentTime: new Date(currentTime).toISOString(),
         elapsedMs,
         totalTimeMs,
         elapsedSeconds: Math.floor(elapsedMs / 1000),
@@ -298,48 +302,70 @@ export default function Game() {
       setTimerExpired(false);
       setShowAnswers(false);
       
-      // Start countdown
-      timerIntervalRef.current = setInterval(() => {
-        setTimerState(prevState => {
-          const newTimeRemaining = prevState.timeRemaining !== null ? prevState.timeRemaining - 1 : 0;
+      // CRITICAL: Use requestAnimationFrame for iOS compatibility
+      let animationFrameId: number;
+      let lastUpdateTime = Date.now();
+      
+      const updateTimer = () => {
+        const now = Date.now();
+        const deltaTime = now - lastUpdateTime;
+        
+        // Only update if at least 1 second has passed
+        if (deltaTime >= 1000) {
+          lastUpdateTime = now;
           
-          if (newTimeRemaining <= 0) {
-            console.log(`[${debugId}] 🎯 TIMER COMPLETED!!! Setting hasExpired = true`);
+          setTimerState(prevState => {
+            // Recalculate from server time for accuracy
+            const currentTime = Date.now();
+            const startTime = new Date(activation.timer_started_at!).getTime();
+            const elapsedMs = currentTime - startTime;
+            const totalTimeMs = activation.time_limit! * 1000;
+            const remainingMs = Math.max(0, totalTimeMs - elapsedMs);
+            const newTimeRemaining = Math.ceil(remainingMs / 1000);
             
-            // Clear interval
-            if (timerIntervalRef.current) {
-              clearInterval(timerIntervalRef.current);
-              timerIntervalRef.current = null;
+            if (newTimeRemaining <= 0) {
+              console.log(`[${debugId}] 🎯 TIMER COMPLETED (iOS)!!! Setting hasExpired = true`);
+              
+              // Update legacy states
+              setTimeRemaining(0);
+              setHasActiveTimer(false);
+              setTimerExpired(true);
+              setShowAnswers(true);
+              
+              return {
+                ...prevState,
+                isActive: false,
+                timeRemaining: 0,
+                hasExpired: true
+              };
             }
             
-            // Update legacy states IMMEDIATELY
-            setTimeRemaining(0);
-            setHasActiveTimer(false);
-            setTimerExpired(true);
-            setShowAnswers(true);
-            
-            // Trigger result reveal for answered questions
-            if (hasAnswered) {
-              setShowResult(true);
-            }
+            // Update legacy state
+            setTimeRemaining(newTimeRemaining);
             
             return {
               ...prevState,
-              isActive: false,
-              timeRemaining: 0,
-              hasExpired: true
+              timeRemaining: newTimeRemaining
             };
-          }
-          
-          // Update legacy state
-          setTimeRemaining(newTimeRemaining);
-          
-          return {
-            ...prevState,
-            timeRemaining: newTimeRemaining
-          };
-        });
-      }, 1000);
+          });
+        }
+        
+        // Continue animation loop if timer hasn't expired
+        if (timerState.isActive || hasActiveTimer) {
+          animationFrameId = requestAnimationFrame(updateTimer);
+        }
+      };
+      
+      // Start the animation loop
+      animationFrameId = requestAnimationFrame(updateTimer);
+      
+      // Store cleanup function
+      timerIntervalRef.current = {
+        [Symbol.toPrimitive](): number {
+          return animationFrameId;
+        },
+        ref: 'raf'
+      } as any;
     } else {
       console.log(`[${debugId}] ⏳ Timer not started yet`);
       setTimerState({
@@ -585,99 +611,99 @@ export default function Game() {
     }
   }, [timerState.hasExpired, timerExpired, hasAnswered, showResult, isCorrect, pointsEarned, currentActivation, debugId, hasPendingReward, pendingPoints, pendingCorrect, pendingResponseTime]);
 
-  // Setup room and initial data
-  useEffect(() => {
-    const setupRoom = async () => {
-      if (!roomId) {
-        navigate('/');
+  // Fetch room and player data
+  const fetchRoomAndActivation = async () => {
+    if (!roomId) {
+      navigate('/');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setShowNetworkStatus(false);
+
+      // CRITICAL FIX: Check if roomId is a UUID or a room code
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(roomId);
+      
+      let roomResponse;
+      if (isUuid) {
+        console.log(`[${debugId}] Detected UUID format, querying by ID`);
+        roomResponse = await retry(async () => {
+          return await supabase
+            .from('rooms')
+            .select('*')
+            .eq('id', roomId)
+            .single();
+        }, 3);
+      } else {
+        console.log(`[${debugId}] Detected room code format, querying by room_code`);
+        roomResponse = await retry(async () => {
+          return await supabase
+            .from('rooms')
+            .select('*')
+            .eq('room_code', roomId.toUpperCase())
+            .single();
+        }, 3);
+      }
+
+      if (roomResponse.error) {
+        if (isNetworkError(roomResponse.error)) {
+          setShowNetworkStatus(true);
+          setError('Connection issue. Please check your internet and try again.');
+        } else if (roomResponse.error.code === 'PGRST116') {
+          setError('Room not found. Please check the room code.');
+          setTimeout(() => navigate('/'), 2000);
+        } else {
+          setError(getFriendlyErrorMessage(roomResponse.error));
+        }
         return;
       }
 
-      try {
-        setLoading(true);
-        setShowNetworkStatus(false);
+      setRoom(roomResponse.data);
 
-       // CRITICAL FIX: Check if roomId is a UUID or a room code
-       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(roomId);
-       
-       let roomResponse;
-       if (isUuid) {
-         console.log(`[${debugId}] Detected UUID format, querying by ID`);
-         roomResponse = await retry(async () => {
-           return await supabase
-             .from('rooms')
-             .select('*')
-             .eq('id', roomId)
-             .single();
-         }, 3);
-       } else {
-         console.log(`[${debugId}] Detected room code format, querying by room_code`);
-         roomResponse = await retry(async () => {
-           return await supabase
-             .from('rooms')
-             .select('*')
-             .eq('room_code', roomId.toUpperCase())
-             .single();
-         }, 3);
-       }
+      // Check if player is already in this room
+      const existingPlayerId = localStorage.getItem('currentPlayerId');
+      if (existingPlayerId) {
+        const { data: existingPlayer } = await supabase
+          .from('players')
+          .select('*')
+          .eq('id', existingPlayerId)
+          .eq('room_id', roomResponse.data.id)
+          .maybeSingle();
 
-        if (roomResponse.error) {
-          if (isNetworkError(roomResponse.error)) {
-            setShowNetworkStatus(true);
-            setError('Connection issue. Please check your internet and try again.');
-          } else if (roomResponse.error.code === 'PGRST116') {
-            setError('Room not found. Please check the room code.');
-            setTimeout(() => navigate('/'), 2000);
-          } else {
-            setError(getFriendlyErrorMessage(roomResponse.error));
-          }
-          return;
+        if (existingPlayer) {
+          setCurrentPlayerId(existingPlayerId);
+          addPlayer(existingPlayer);
+          setPlayerScore(existingPlayer.score || 0);
+          console.log(`[${debugId}] Found existing player:`, existingPlayer.name);
         }
-
-        setRoom(roomResponse.data);
-
-        // Check if player is already in this room
-        const existingPlayerId = localStorage.getItem('currentPlayerId');
-        if (existingPlayerId) {
-          const { data: existingPlayer } = await supabase
-            .from('players')
-            .select('*')
-            .eq('id', existingPlayerId)
-            .eq('room_id', roomResponse.data.id)
-            .maybeSingle();
-
-          if (existingPlayer) {
-            setCurrentPlayerId(existingPlayerId);
-            addPlayer(existingPlayer);
-            setPlayerScore(existingPlayer.score || 0);
-            console.log(`[${debugId}] Found existing player:`, existingPlayer.name);
-            // Note: Analytics for player join/rejoin is handled in PlayerEntry component
-          }
-        }
-
-        // Get current game session
-        const sessionResponse = await retry(async () => {
-          return await supabase
-            .from('game_sessions')
-            .select('*, activations(*)')
-            .eq('room_id', roomResponse.data.id)
-            .eq('is_live', true)
-            .maybeSingle();
-        }, 3);
-
-        if (sessionResponse.data?.activations) {
-          handleActivationChange(sessionResponse.data.activations);
-        }
-
-        setLoading(false);
-      } catch (err: any) {
-        console.error('Error setting up room:', err);
-        setError(getFriendlyErrorMessage(err));
-        setLoading(false);
       }
-    };
 
-    setupRoom();
+      // Get current game session
+      const sessionResponse = await retry(async () => {
+        return await supabase
+          .from('game_sessions')
+          .select('*, activations(*)')
+          .eq('room_id', roomResponse.data.id)
+          .eq('is_live', true)
+          .maybeSingle();
+      }, 3);
+
+      if (sessionResponse.data?.activations) {
+        handleActivationChange(sessionResponse.data.activations);
+      }
+
+      setLoading(false);
+    } catch (err: any) {
+      console.error('Error setting up room:', err);
+      setError(getFriendlyErrorMessage(err));
+      setLoading(false);
+    }
+  };
+
+  // Setup room and initial data
+  useEffect(() => {
+    fetchRoomAndActivation();
   }, [roomId, navigate, addPlayer, setCurrentPlayerId, debugId]);
 
   // Handle activation changes
@@ -773,36 +799,60 @@ export default function Game() {
     };
   }, [room?.id, currentActivation?.id, debugId]);
 
-  // Cleanup timer on unmount
+  // Cleanup timer on unmount or activation change
   useEffect(() => {
     return () => {
       if (timerIntervalRef.current) {
-        clearInterval(timerIntervalRef.current);
+        // Check if it's a requestAnimationFrame ID
+        if (typeof timerIntervalRef.current === 'object' && timerIntervalRef.current.ref === 'raf') {
+          cancelAnimationFrame(Number(timerIntervalRef.current));
+        } else {
+          clearInterval(timerIntervalRef.current);
+        }
+        timerIntervalRef.current = null;
       }
     };
-  }, []);
+  }, [currentActivation?.id]);
 
-  // Compute display values
-  const currentTimeRemaining = timerState.timeRemaining ?? timeRemaining;
-  const shouldShowTimer = (timerState.isActive || hasActiveTimer) && 
-                        currentTimeRemaining !== null && 
-                        currentTimeRemaining > 0 &&
-                        (currentActivation?.type === 'multiple_choice' || currentActivation?.type === 'text_answer');
+  // Media display helper
+  const renderMedia = () => {
+    if (!currentActivation?.media_url || currentActivation.media_type === 'none') {
+      return null;
+    }
 
-  // Get room theme
-  const roomTheme = room?.theme || {
-    primary_color: theme.primary_color || '#6366F1',
-    secondary_color: theme.secondary_color || '#8B5CF6',
-    background_color: theme.background_color || '#F3F4F6',
-    text_color: theme.text_color || '#1F2937'
+    return (
+      <div className="mb-6 flex justify-center">
+        {currentActivation.media_type === 'youtube' ? (
+          <div className="w-full max-w-lg rounded-lg shadow-md overflow-hidden">
+            <div className="aspect-video">
+              <MediaDisplay
+                url={currentActivation.media_url}
+                type={currentActivation.media_type}
+                alt="Question media"
+                className="w-full h-full"
+                fallbackText="Video not available"
+              />
+            </div>
+          </div>
+        ) : (
+          <MediaDisplay
+            url={currentActivation.media_url}
+            type={currentActivation.media_type}
+            alt="Question media"
+            className="max-h-64 rounded-lg shadow-md"
+            fallbackText="Image not available"
+          />
+        )}
+      </div>
+    );
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: roomTheme.primary_color }}>
-        <div className="text-center">
-          <Loader2 className="w-12 h-12 animate-spin text-white mb-4 mx-auto" />
-          <p className="text-white text-lg">Loading game...</p>
+      <div className="flex items-center justify-center min-h-screen bg-theme-gradient">
+        <div className="flex flex-col items-center">
+          <Loader2 className="w-12 h-12 text-white animate-spin mb-4" />
+          <p className="text-white text-xl">Loading game...</p>
         </div>
       </div>
     );
@@ -810,16 +860,16 @@ export default function Game() {
 
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: roomTheme.primary_color }}>
-        <div className="bg-white/10 backdrop-blur-sm rounded-lg shadow-lg p-8 max-w-md w-full mx-4">
-          <AlertCircle className="w-12 h-12 text-red-400 mb-4 mx-auto" />
-          <h2 className="text-2xl font-bold text-white mb-2">Error</h2>
-          <p className="text-white/80">{error}</p>
+      <div className="flex items-center justify-center min-h-screen bg-theme-gradient p-4">
+        <div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full text-center">
+          <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
+          <h1 className="text-2xl font-bold text-gray-800 mb-4">Error</h1>
+          <p className="text-gray-600 mb-6">{error}</p>
           <button
-            onClick={() => navigate('/')}
-            className="mt-4 w-full px-4 py-2 bg-white/20 text-white rounded-lg hover:bg-white/30 transition-colors"
+            onClick={() => navigate('/join')}
+            className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
           >
-            Back to Home
+            Back to Join
           </button>
         </div>
       </div>
@@ -828,14 +878,14 @@ export default function Game() {
 
   if (!currentPlayerId) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: roomTheme.primary_color }}>
-        <div className="bg-white/10 backdrop-blur-sm rounded-lg shadow-lg p-8 max-w-md w-full mx-4">
-          <Trophy className="w-12 h-12 text-yellow-400 mb-4 mx-auto" />
-          <h2 className="text-2xl font-bold text-white mb-4">Join the Game!</h2>
-          <p className="text-white/80 mb-4">Please enter your name to join this room.</p>
+      <div className="flex items-center justify-center min-h-screen bg-theme-gradient p-4">
+        <div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full text-center">
+          <Trophy className="w-16 h-16 text-yellow-500 mx-auto mb-4" />
+          <h1 className="text-2xl font-bold text-gray-800 mb-4">Join the Game!</h1>
+          <p className="text-gray-600 mb-6">You need to join the room first to play.</p>
           <button
-            onClick={() => navigate(`/join/${roomId}`)}
-            className="w-full px-4 py-3 bg-white text-gray-900 rounded-lg hover:bg-gray-100 transition-colors flex items-center justify-center gap-2"
+            onClick={() => navigate(`/join?code=${room?.room_code || roomId}`)}
+            className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center justify-center gap-2 mx-auto"
           >
             <Users className="w-5 h-5" />
             Join Room
@@ -845,118 +895,133 @@ export default function Game() {
     );
   }
 
+  const roomTheme = room?.theme || theme;
+
+  // CRITICAL FIX: Enhanced timer visibility logic using both new and legacy states
+  const shouldShowTimer = (timerState.isActive || hasActiveTimer) && 
+                         (timerState.timeRemaining !== null || timeRemaining !== null) && 
+                         (timerState.timeRemaining! >= 0 || timeRemaining! >= 0);
+
+  // Use the most current time remaining value
+  const currentTimeRemaining = timerState.timeRemaining !== null ? timerState.timeRemaining : timeRemaining;
+
   return (
     <div 
-      className="min-h-screen flex flex-col overflow-x-hidden"
+      className="min-h-screen p-4 relative"
       style={{ 
-        backgroundColor: roomTheme.primary_color,
-        background: `linear-gradient(135deg, ${roomTheme.primary_color} 0%, ${roomTheme.secondary_color} 100%)`
+        background: `linear-gradient(to bottom right, ${roomTheme.primary_color}, ${roomTheme.secondary_color})` 
       }}
     >
-      {showNetworkStatus && <NetworkStatus />}
-      
-      {/* MOBILE TIMER - CRITICAL FIX: Show at top on mobile */}
-      {shouldShowTimer && isMobile && currentTimeRemaining !== null && (
-        <div className="fixed top-0 left-0 right-0 z-50 bg-red-500/90 backdrop-blur-sm text-white p-3 shadow-lg">
-          <div className="flex items-center justify-center">
-            <Clock className="w-5 h-5 mr-2" />
-            <span className="font-mono font-bold text-lg tabular-nums">
-              {Math.floor(currentTimeRemaining / 60)}:{(currentTimeRemaining % 60).toString().padStart(2, '0')}
-            </span>
-          </div>
+      {/* Network status indicator */}
+      {showNetworkStatus && (
+        <div className="fixed top-0 left-0 right-0 z-50 p-2">
+          <NetworkStatus 
+            onRetry={() => {
+              setShowNetworkStatus(false);
+              fetchRoomAndActivation();
+            }}
+          />
         </div>
       )}
-      
-      <div className={`flex-1 p-4 max-w-4xl mx-auto w-full ${shouldShowTimer && isMobile ? 'mt-16' : ''}`}>
-        {/* Header */}
-        <div className={`mb-6 flex items-center justify-between ${shouldShowTimer && isMobile ? 'mt-2' : 'mt-4'}`}>
-          <div className="flex items-center">
-            {room?.logo_url && (
-              <img 
-                src={room.logo_url} 
-                alt={room.name} 
-                className="h-8 sm:h-10 w-auto object-contain mr-3"
-              />
-            )}
-            <h1 className="text-lg sm:text-xl font-bold text-white">{room?.name}</h1>
-          </div>
-          
-          <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
-            <PointsDisplay 
-              points={playerScore} 
-              className="text-white text-sm sm:text-base" 
-              showIcon={true}
-            />
-            
-            {/* DESKTOP TIMER */}
-            {shouldShowTimer && !isMobile && currentTimeRemaining !== null && (
-              <div className="flex items-center px-4 py-2 bg-red-500/20 backdrop-blur-sm rounded-full text-white font-mono border border-red-400/50">
-                <Clock className="w-5 h-5 mr-2 text-red-300" />
-                <span className="font-bold text-lg tabular-nums">
+
+      {/* CRITICAL FIX: Enhanced mobile timer with iOS-specific fixes */}
+      {shouldShowTimer && currentTimeRemaining !== null && (
+        <div className={`${isMobile ? 'fixed top-4 left-4 right-4 z-[9999]' : 'hidden sm:block'}`}>
+          <div className="flex justify-center">
+            <div 
+              className={`${isMobile 
+                ? 'bg-red-600 text-white px-6 py-4 rounded-xl shadow-2xl border-4 border-yellow-400' 
+                : 'bg-white/20 backdrop-blur-sm text-white px-4 py-2 rounded-lg'
+              }`}
+              style={isMobile ? {
+                WebkitTransform: 'translateZ(0)', // Force GPU acceleration on iOS
+                transform: 'translateZ(0)',
+                willChange: 'transform'
+              } : {}}
+            >
+              <div className={`flex items-center justify-center ${isMobile ? 'text-2xl' : 'text-lg'} font-bold`}>
+                <Clock className={`${isMobile ? 'w-8 h-8 mr-3 text-yellow-300' : 'w-5 h-5 mr-2'} flex-shrink-0`} />
+                <span className={`${isMobile ? 'text-3xl' : 'text-xl'} tabular-nums font-mono`}>
                   {Math.floor(currentTimeRemaining / 60)}:{(currentTimeRemaining % 60).toString().padStart(2, '0')}
                 </span>
               </div>
+              {isMobile && (
+                <div className="text-center text-yellow-200 text-sm mt-1 font-medium">
+                  Time Remaining
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="max-w-4xl mx-auto">
+        {/* Header - Add top margin on mobile when timer is showing */}
+        <div className={`flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-4 ${shouldShowTimer && isMobile ? 'mt-20' : ''}`}>
+          <div className="flex items-center">
+            {room?.logo_url && (
+              <img 
+                src={getStorageUrl(room.logo_url)} 
+                alt="Room logo" 
+                className="h-10 w-auto object-contain mr-3"
+              />
             )}
+            <h1 className="text-2xl font-bold text-white">{room?.name}</h1>
+          </div>
+          
+          <div className="flex items-center gap-4">
+            <PointsDisplay points={playerScore} className="text-white" />
             
-            {/* POLL TIMER */}
-            {currentActivation?.type === 'poll' && currentActivation.time_limit && currentActivation.timer_started_at && (
-              <div className="flex items-center px-3 py-2 bg-yellow-500/20 backdrop-blur-sm rounded-full text-white font-mono text-sm border border-yellow-500/30">
-                <Clock className="w-4 h-4 mr-2 flex-shrink-0" />
+            {/* Desktop timer */}
+            {shouldShowTimer && !isMobile && currentTimeRemaining !== null && (
+              <div className="bg-white/20 backdrop-blur-sm px-4 py-2 rounded-lg">
                 <CountdownTimer 
-                  initialSeconds={currentActivation.time_limit}
-                  startTime={currentActivation.timer_started_at}
-                  variant="small"
-                  showIcon={false}
-                  showProgressBar={false}
-                  className="text-yellow-200"
+                  duration={currentTimeRemaining} 
+                  onComplete={() => {
+                    setTimerState(prev => ({ ...prev, hasExpired: true }));
+                    setTimerExpired(true);
+                  }}
+                  size="sm"
+                  showLabel={false}
                 />
               </div>
             )}
           </div>
         </div>
-        
-        {/* Current Activation */}
-        {currentActivation ? (
-          <ErrorBoundary
-            fallback={
-              <div className="bg-white/10 backdrop-blur-sm rounded-lg shadow-lg p-6 text-center">
-                <AlertCircle className="w-12 h-12 text-white/50 mx-auto mb-4" />
-                <p className="text-xl text-white mb-4">There was an error loading this content</p>
-                <button
-                  onClick={() => window.location.reload()}
-                  className="px-4 py-2 bg-white/20 text-white rounded-lg hover:bg-white/30"
-                >
-                  Reload Page
-                </button>
-              </div>
-            }
-          >
-            <div className="bg-white/10 backdrop-blur-sm rounded-lg shadow-lg p-4 sm:p-6">
-              {currentActivation.type === 'leaderboard' ? (
-                <LeaderboardDisplay 
-                  roomId={roomId!}
-                  currentPlayerId={currentPlayerId}
-                  playerScore={playerScore}
-                />
-              ) : (
-                <>
-                  {/* Question */}
-                  <div className="mb-6">
-                    <h2 className="text-2xl sm:text-3xl font-bold text-white mb-4">{currentActivation.question}</h2>
-                    {currentActivation.media_url && (
-                      <MediaDisplay
-                        mediaType={currentActivation.media_type}
-                        mediaUrl={getStorageUrl(currentActivation.media_url)}
-                        className="mb-4"
-                      />
-                    )}
-                  </div>
 
-                  {/* Answer Status */}
-                  {hasAnswered && showResult && canRevealResults() && (currentActivation.type === 'multiple_choice' || currentActivation.type === 'text_answer') && (
-                    <div className={`mb-6 p-4 rounded-lg flex items-center ${
-                      isCorrect ? 'bg-green-500/20 border border-green-400/50' : 'bg-red-500/20 border border-red-400/50'
-                    }`}>
+        {/* Main Content */}
+        {currentActivation ? (
+          <ErrorBoundary>
+            <div className="bg-white/10 backdrop-blur-sm rounded-lg shadow-lg p-6">
+            {currentActivation.type === 'leaderboard' ? (
+              <div>
+                <div className="text-center mb-6">
+                  <Trophy className="w-16 h-16 text-yellow-400 mx-auto mb-4" />
+                  <h2 className="text-3xl font-bold text-white mb-2">Leaderboard</h2>
+                  <p className="text-white/70">See how you rank against other players!</p>
+                </div>
+                <LeaderboardDisplay
+                  roomId={room?.id}
+                  currentPlayerId={currentPlayerId}
+                  theme={roomTheme}
+                />
+              </div>
+            ) : (
+              <>
+                <h2 className="text-2xl sm:text-3xl font-bold text-white mb-6">
+                  {currentActivation.question}
+                </h2>
+                
+                {renderMedia()}
+
+                {/* Answer feedback */}
+                {hasAnswered && showResult && canRevealResults() && (currentActivation.type === 'multiple_choice' || currentActivation.type === 'text_answer') && (
+                  <div className={`mb-6 p-4 rounded-lg ${
+                    isCorrect 
+                      ? 'bg-green-500/20 border-2 border-green-400' 
+                      : 'bg-red-500/20 border-2 border-red-400'
+                  }`}>
+                    <div className="flex items-center">
                       {isCorrect ? (
                         <>
                           <CheckCircle className="w-6 h-6 text-green-400 mr-3" />
@@ -981,124 +1046,125 @@ export default function Game() {
                         </>
                       )}
                     </div>
-                  )}
+                  </div>
+                )}
 
-                  {/* Answer Options */}
-                  {currentActivation.type === 'multiple_choice' && (
-                    <div className="space-y-3">
-                      {currentActivation.options?.map((option, index) => (
+                {/* Answer Options */}
+                {currentActivation.type === 'multiple_choice' && (
+                  <div className="space-y-3">
+                    {currentActivation.options?.map((option, index) => (
+                      <button
+                        key={index}
+                        onClick={() => handleMultipleChoiceAnswer(option.text, option.id)}
+                        disabled={hasAnswered}
+                        className={`w-full p-4 rounded-lg text-left transition-all ${
+                          hasAnswered
+                            ? selectedAnswer === option.text
+                              ? showResult && canRevealResults()
+                                ? isCorrect
+                                  ? 'bg-green-500/30 border-2 border-green-400'
+                                  : 'bg-red-500/30 border-2 border-red-400'
+                                : 'bg-white/20 border-2 border-white/40'
+                              : showResult && showAnswers && canRevealResults() && option.text === currentActivation.correct_answer
+                                ? 'bg-green-500/20 border-2 border-green-400/50'
+                                : 'bg-white/10 opacity-50'
+                            : 'bg-white/10 hover:bg-white/20 cursor-pointer'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          {option.media_url && option.media_type && option.media_type !== 'none' && (
+                            <img
+                              src={getStorageUrl(option.media_url)}
+                              alt={option.text}
+                              className="w-16 h-16 object-cover rounded"
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                              }}
+                            />
+                          )}
+                          <span className="text-white font-medium text-base sm:text-lg text-left">{option.text}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Text Answer */}
+                {currentActivation.type === 'text_answer' && (
+                  <form onSubmit={handleTextAnswerSubmit} className="space-y-4">
+                    <input
+                      type="text"
+                      value={textAnswer}
+                      onChange={(e) => setTextAnswer(e.target.value)}
+                      disabled={hasAnswered}
+                      placeholder="Type your answer..."
+                      className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:border-white/40 disabled:opacity-50"
+                    />
+                    <button
+                      type="submit"
+                      disabled={hasAnswered || !textAnswer.trim()}
+                      className={`w-full px-4 py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all ${
+                        hasAnswered
+                          ? 'bg-white/10 text-white/50 cursor-not-allowed'
+                          : 'bg-white text-gray-900 hover:bg-gray-100'
+                      }`}
+                    >
+                      <Send className="w-5 h-5" />
+                      Submit Answer
+                    </button>
+                  </form>
+                )}
+
+                {/* Poll Options */}
+                {currentActivation.type === 'poll' && (
+                  <div className="space-y-3">
+                    {pollState === 'voting' ? (
+                      currentActivation.options?.map((option, index) => (
                         <button
                           key={index}
-                          onClick={() => handleMultipleChoiceAnswer(option.text, option.id)}
-                          disabled={hasAnswered || pollState === 'closed'}
+                          onClick={() => handlePollVote(option.text, option.id)}
+                          disabled={pollVoted || pollLoading}
                           className={`w-full p-4 rounded-lg text-left transition-all ${
-                            hasAnswered
+                            pollVoted
                               ? selectedAnswer === option.text
-                                ? showResult && canRevealResults()
-                                  ? isCorrect
-                                    ? 'bg-green-500/30 border-2 border-green-400'
-                                    : 'bg-red-500/30 border-2 border-red-400'
-                                  : 'bg-white/20 border-2 border-white/40'
-                                : showResult && showAnswers && canRevealResults() && option.text === currentActivation.correct_answer
-                                  ? 'bg-green-500/20 border-2 border-green-400/50'
-                                  : 'bg-white/10 opacity-50'
+                                ? 'bg-blue-500/30 border-2 border-blue-400'
+                                : 'bg-white/10 opacity-50'
                               : 'bg-white/10 hover:bg-white/20 cursor-pointer'
                           }`}
                         >
                           <div className="flex items-center gap-3">
-                            {option.media_url && (
-                              <img 
+                            {option.media_url && option.media_type && option.media_type !== 'none' && (
+                              <img
                                 src={getStorageUrl(option.media_url)}
-                                alt=""
-                                className="w-12 h-12 object-cover rounded"
+                                alt={option.text}
+                                className="w-16 h-16 object-cover rounded"
                                 onError={(e) => {
                                   e.currentTarget.style.display = 'none';
                                 }}
                               />
                             )}
-                            <span className="text-white font-medium text-base sm:text-lg">{option.text}</span>
+                            <span className="text-white font-medium text-base sm:text-lg text-left">{option.text}</span>
                           </div>
                         </button>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Text Answer */}
-                  {currentActivation.type === 'text_answer' && (
-                    <form onSubmit={handleTextAnswerSubmit} className="space-y-4">
-                      <input
-                        type="text"
-                        value={textAnswer}
-                        onChange={(e) => setTextAnswer(e.target.value)}
-                        disabled={hasAnswered}
-                        placeholder="Type your answer..."
-                        className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:border-white/40"
+                      ))
+                    ) : (
+                      <PollDisplay
+                        options={currentActivation.options || []}
+                        votes={pollVotes}
+                        totalVotes={totalVotes}
+                        displayType={currentActivation.poll_display_type || 'bar'}
+                        pollState={pollState}
+                        resultFormat={currentActivation.poll_result_format}
+                        selectedAnswer={selectedAnswer}
+                        selectedOptionId={selectedOptionId}
+                        getStorageUrl={getStorageUrl}
+                        themeColors={roomTheme}
                       />
-                      <button
-                        type="submit"
-                        disabled={hasAnswered || !textAnswer.trim()}
-                        className={`w-full px-4 py-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all ${
-                          hasAnswered
-                            ? 'bg-white/10 text-white/50 cursor-not-allowed'
-                            : 'bg-white text-gray-900 hover:bg-gray-100'
-                        }`}
-                      >
-                        <Send className="w-5 h-5" />
-                        Submit Answer
-                      </button>
-                    </form>
-                  )}
-
-                  {/* Poll Options */}
-                  {currentActivation.type === 'poll' && (
-                    <div className="space-y-3">
-                      {pollState === 'voting' ? (
-                        currentActivation.options?.map((option, index) => (
-                          <button
-                            key={index}
-                            onClick={() => handlePollVote(option.text, option.id)}
-                            disabled={pollVoted || pollLoading}
-                            className={`w-full p-4 rounded-lg text-left transition-all ${
-                              pollVoted
-                                ? selectedAnswer === option.text
-                                  ? 'bg-blue-500/30 border-2 border-blue-400'
-                                  : 'bg-white/10 opacity-50'
-                                : 'bg-white/10 hover:bg-white/20 cursor-pointer'
-                            }`}
-                          >
-                            <div className="flex items-center gap-3">
-                              {option.media_url && (
-                                <img 
-                                  src={getStorageUrl(option.media_url)}
-                                  alt=""
-                                  className="w-12 h-12 object-cover rounded"
-                                  onError={(e) => {
-                                    e.currentTarget.style.display = 'none';
-                                  }}
-                                />
-                              )}
-                              <span className="text-white font-medium text-base sm:text-lg text-left">{option.text}</span>
-                            </div>
-                          </button>
-                        ))
-                      ) : (
-                        <PollDisplay
-                          options={currentActivation.options || []}
-                          votes={pollVotes}
-                          totalVotes={totalVotes}
-                          displayType={currentActivation.poll_display_type || 'bar'}
-                          pollState={pollState}
-                          resultFormat={currentActivation.poll_result_format}
-                          selectedAnswer={selectedAnswer}
-                          selectedOptionId={selectedOptionId}
-                          getStorageUrl={getStorageUrl}
-                          themeColors={roomTheme}
-                        />
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
+                    )}
+                  </div>
+                )}
+              </>
+            )}
             </div>
           </ErrorBoundary>
         ) : (
