@@ -938,31 +938,26 @@ export default function Game() {
       )}
 
       {/* CRITICAL FIX: Enhanced mobile timer with iOS-specific fixes */}
-      {shouldShowTimer && currentTimeRemaining !== null && (
-        <div className={`${isMobile ? 'fixed top-4 left-4 right-4 z-[9999]' : 'hidden sm:block'}`}>
+      {shouldShowTimer && currentTimeRemaining !== null && !isNaN(currentTimeRemaining) && (
+        <div className={`${isMobile ? 'fixed top-4 left-4 right-4 z-[9999]' : 'hidden'}`}>
           <div className="flex justify-center">
             <div 
-              className={`${isMobile 
-                ? 'bg-red-600 text-white px-6 py-4 rounded-xl shadow-2xl border-4 border-yellow-400' 
-                : 'bg-white/20 backdrop-blur-sm text-white px-4 py-2 rounded-lg'
-              }`}
+              className={`bg-red-600 text-white px-6 py-4 rounded-xl shadow-2xl border-4 border-yellow-400`}
               style={isMobile ? {
                 WebkitTransform: 'translateZ(0)', // Force GPU acceleration on iOS
                 transform: 'translateZ(0)',
                 willChange: 'transform'
               } : {}}
             >
-              <div className={`flex items-center justify-center ${isMobile ? 'text-2xl' : 'text-lg'} font-bold`}>
-                <Clock className={`${isMobile ? 'w-8 h-8 mr-3 text-yellow-300' : 'w-5 h-5 mr-2'} flex-shrink-0`} />
-                <span className={`${isMobile ? 'text-3xl' : 'text-xl'} tabular-nums font-mono`}>
-                  {Math.floor(currentTimeRemaining / 60)}:{(currentTimeRemaining % 60).toString().padStart(2, '0')}
-                </span>
-              </div>
-              {isMobile && (
-                <div className="text-center text-yellow-200 text-sm mt-1 font-medium">
-                  Time Remaining
-                </div>
-              )}
+              <CountdownTimer 
+                duration={currentTimeRemaining} 
+                onComplete={() => {
+                  console.log(`[${debugId}] Timer completed on mobile`);
+                }}
+                size="lg"
+                showLabel={true}
+                className="!text-yellow-300"
+              />
             </div>
           </div>
         </div>
@@ -986,13 +981,12 @@ export default function Game() {
             <PointsDisplay points={playerScore} className="text-white" />
             
             {/* Desktop timer */}
-            {shouldShowTimer && !isMobile && currentTimeRemaining !== null && (
+            {shouldShowTimer && !isMobile && currentTimeRemaining !== null && !isNaN(currentTimeRemaining) && (
               <div className="bg-white/20 backdrop-blur-sm px-4 py-2 rounded-lg">
                 <CountdownTimer 
                   duration={currentTimeRemaining} 
                   onComplete={() => {
-                    setTimerState(prev => ({ ...prev, hasExpired: true }));
-                    setTimerExpired(true);
+                    console.log(`[${debugId}] Timer completed on desktop`);
                   }}
                   size="sm"
                   showLabel={false}
