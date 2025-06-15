@@ -787,8 +787,7 @@ export default function Game() {
     return () => {
       if (timerIntervalRef.current) {
         // Check if it's a requestAnimationFrame ID
-        if (typeof timerIntervalRef.current === 'object' && timerInterval
-Ref.current.ref === 'raf') {
+        if (typeof timerIntervalRef.current === 'object' && timerIntervalRef.current.ref === 'raf') {
           cancelAnimationFrame(timerIntervalRef.current[Symbol.toPrimitive]());
         } else {
           clearInterval(timerIntervalRef.current);
