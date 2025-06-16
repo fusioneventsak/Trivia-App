@@ -1,6 +1,6 @@
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { retry, isNetworkError, logError } from '../lib/error-handling';
-import { submitPollVote, hasPlayerVoted, getPollState } from '../lib/poll-service';
 
 interface PollOption {
   id?: string;
@@ -23,6 +23,7 @@ interface PollVoteCount {
 }
 
 interface UsePollManagerProps {
+import React, { useState, useEffect, useRef, useCallback } from 'react';
   activationId: string | null;
   options?: PollOption[];
   playerId?: string | null;

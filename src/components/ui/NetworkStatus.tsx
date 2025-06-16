@@ -1,23 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { WifiOff, Wifi, RefreshCw, Activity } from 'lucide-react';
+import { WifiOff, Wifi, RefreshCw } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 interface NetworkStatusProps {
   onRetry?: () => void;
   className?: string;
-  showOnlyWhenOffline?: boolean;
-  pollingInterval?: number;
 }
 
 /**
  * A component that displays the current network status and provides a retry button
  */
-const NetworkStatus: React.FC<NetworkStatusProps> = ({ 
-  onRetry, 
-  className,
-  showOnlyWhenOffline = true,
-  pollingInterval
-}) => {
+const NetworkStatus: React.FC<NetworkStatusProps> = ({ onRetry, className }) => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [isRetrying, setIsRetrying] = useState(false);
 
@@ -53,11 +46,6 @@ const NetworkStatus: React.FC<NetworkStatusProps> = ({
     }, 2000);
   };
 
-  // If we're only showing when offline and we're online, return null
-  if (showOnlyWhenOffline && isOnline) {
-    return null;
-  }
-
   return (
     <div 
       className={cn(
@@ -72,21 +60,9 @@ const NetworkStatus: React.FC<NetworkStatusProps> = ({
         ) : (
           <WifiOff className="w-4 h-4 mr-2" />
         )}
-        <div>
-          <span>
-            {isOnline ? 'Connected' : 'No internet connection'}
-          </span>
-          {isOnline && pollingInterval && (
-            <div className="text-xs flex items-center mt-0.5">
-              <Activity className="w-3 h-3 mr-1" />
-              <span>
-                {pollingInterval <= 2000 ? 'Fast updates' : 
-                 pollingInterval <= 5000 ? 'Normal updates' : 
-                 'Slow updates'} ({(pollingInterval / 1000).toFixed(1)}s)
-              </span>
-            </div>
-          )}
-        </div>
+        <span>
+          {isOnline ? 'Connected' : 'No internet connection'}
+        </span>
       </div>
       
       <button

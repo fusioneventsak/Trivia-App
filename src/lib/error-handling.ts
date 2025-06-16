@@ -29,21 +29,25 @@ export async function logError(
     url: window.location.href
   };
   
-  // Log to analytics_events table if connected
-  try {
-    const { error: dbError } = await supabase
-      .from('analytics_events')
-      .insert([{
-        event_type: 'client_error',
-        user_id: userId,
-        event_data: errorData
-      }]);
-    
-    if (dbError) {
-      console.warn('Failed to log error to database:', dbError);
+  // Only try to log to analytics_events if we're online
+  if (navigator.onLine) {
+    try {
+      const { error: dbError } = await supabase
+        .from('analytics_events')
+        .insert([{
+          event_type: 'client_error',
+          user_id: userId,
+          event_data: errorData
+        }]);
+      
+      if (dbError) {
+        console.warn('Failed to log error to database:', dbError);
+      }
+    } catch (logError) {
+      console.warn('Error logging to database:', logError);
     }
-  } catch (logError) {
-    console.warn('Error logging to database:', logError);
+  } else {
+    console.warn('Offline - error not logged to database');
   }
 }
 
@@ -63,6 +67,11 @@ export async function retry<T>(
   try {
     return await fn();
   } catch (error) {
+    // If we're offline, don't retry - just fail fast
+    if (!navigator.onLine || isNetworkError(error)) {
+      throw new Error('Network error: You appear to be offline');
+    }
+    
     if (retries <= 0) {
       throw error;
     }
@@ -107,6 +116,10 @@ export function isNetworkError(error: any): boolean {
  * @param error The error object
  */
 export function getFriendlyErrorMessage(error: any): string {
+  if (!navigator.onLine) {
+    return 'You are currently offline. Please check your internet connection and try again.';
+  }
+  
   if (isNetworkError(error)) {
     return 'Network error. Please check your internet connection and try again.';
   }

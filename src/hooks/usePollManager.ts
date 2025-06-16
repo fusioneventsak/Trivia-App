@@ -23,6 +23,7 @@ interface PollVoteCount {
 }
 
 interface UsePollManagerProps {
+import React, { useState, useEffect, useRef, useCallback } from 'react';
   activationId: string | null;
   options?: PollOption[];
   playerId?: string | null;
