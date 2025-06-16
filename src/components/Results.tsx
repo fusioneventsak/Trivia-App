@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useTheme } from '../context/ThemeContext';
 import { Loader2, AlertCircle, Clock } from 'lucide-react';
+import { retry, isNetworkError } from '../lib/error-handling';
 import PollResultsChart from './ui/PollResultsChart';
 import MediaDisplay from './ui/MediaDisplay';
 import { cn } from '../lib/utils';
@@ -24,6 +25,7 @@ const Results: React.FC<ResultsProps> = ({ code: propCode }) => {
   const [pollVotesByText, setPollVotesByText] = useState<{[key: string]: number}>({});
   const [totalVotes, setTotalVotes] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
   
   // Load room and current activation
   useEffect(() => {
@@ -39,51 +41,74 @@ const Results: React.FC<ResultsProps> = ({ code: propCode }) => {
         setError(null);
         
         // Get room by code
-        const { data: roomData, error: roomError } = await supabase
-          .from('rooms')
-          .select('*')
-          .eq('room_code', code.toUpperCase())
-          .single();
+        const { data: roomData, error: roomError } = await retry(async () => {
+          return await supabase
+            .from('rooms')
+            .select('*')
+            .eq('room_code', code.toUpperCase())
+            .single();
+        }, 3);
           
         if (roomError) {
           throw new Error('Room not found');
         }
         
+        console.log('Room loaded:', roomData);
         setRoom(roomData);
         setRoomId(roomData.id);
         
         // Get current game session
-        const { data: sessionData, error: sessionError } = await supabase
-          .from('game_sessions')
-          .select('current_activation')
-          .eq('room_id', roomData.id)
-          .single();
+        const { data: sessionData, error: sessionError } = await retry(async () => {
+          return await supabase
+            .from('game_sessions')
+            .select('current_activation')
+            .eq('room_id', roomData.id)
+            .maybeSingle();
+        }, 3);
           
         if (sessionError) {
-          console.error('Error fetching game session:', sessionError);
-          // Don't throw here, just continue without an activation
+          if (sessionError.code !== 'PGRST116') {
+            console.error('Error fetching game session:', sessionError);
+          } else {
+            console.log('No game session found for room:', roomData.id);
+          }
+          // Continue without an activation
         } else if (sessionData?.current_activation) {
+          console.log('Found current activation:', sessionData.current_activation);
+          
           // Get current activation
-          const { data: activationData, error: activationError } = await supabase
-            .from('activations')
-            .select('*')
-            .eq('id', sessionData.current_activation)
-            .single();
+          const { data: activationData, error: activationError } = await retry(async () => {
+            return await supabase
+              .from('activations')
+              .select('*')
+              .eq('id', sessionData.current_activation)
+              .single();
+          }, 3);
             
           if (!activationError && activationData) {
+            console.log('Activation loaded:', activationData);
             setCurrentActivation(activationData);
             
             // If it's a poll, fetch votes
             if (activationData.type === 'poll') {
               fetchPollVotes(activationData.id);
             }
+          } else {
+            console.error('Error fetching activation:', activationError);
           }
         }
         
         setLoading(false);
       } catch (err: any) {
         console.error('Error loading room:', err);
-        setError(err.message || 'Failed to load room');
+        
+        // Check if it's a network error
+        if (isNetworkError(err)) {
+          setError('Network error. Please check your connection and try again.');
+        } else {
+          setError(err.message || 'Failed to load room');
+        }
+        
         setLoading(false);
       }
     };
@@ -91,7 +116,7 @@ const Results: React.FC<ResultsProps> = ({ code: propCode }) => {
     loadRoom();
 
     // Set up subscription for activation changes
-    const activationSubscription = supabase.channel(`activation_changes`)
+    const activationSubscription = supabase.channel(`activation_changes_${roomId || 'none'}`)
       .on('postgres_changes', {
         event: 'UPDATE',
         schema: 'public',
@@ -99,7 +124,8 @@ const Results: React.FC<ResultsProps> = ({ code: propCode }) => {
         filter: `room_id=eq.${roomId}`
       }, (payload) => {
         if (payload.new && currentActivation?.id === payload.new.id) {
-          setCurrentActivation(payload.new);
+          console.log('Activation updated:', payload.new);
+          setCurrentActivation(prev => ({...prev, ...payload.new}));
           
           // If poll state changed, refresh votes
           if (payload.new.type === 'poll' && 
@@ -111,13 +137,14 @@ const Results: React.FC<ResultsProps> = ({ code: propCode }) => {
       .subscribe();
     
     // Set up subscription for game session changes
-    const gameSessionSubscription = supabase.channel(`game_session_changes`)
+    const gameSessionSubscription = supabase.channel(`game_session_${roomId || 'none'}`)
       .on('postgres_changes', {
         event: 'UPDATE',
         schema: 'public',
         table: 'game_sessions',
         filter: `room_id=eq.${roomId}`
       }, (payload) => {
+        console.log('Game session updated:', payload);
         // If current_activation changed, reload
         if (payload.new && payload.old && 
             payload.new.current_activation !== payload.old.current_activation) {
@@ -130,7 +157,7 @@ const Results: React.FC<ResultsProps> = ({ code: propCode }) => {
       gameSessionSubscription.unsubscribe();
       activationSubscription.unsubscribe();
     };
-  }, [code, roomId]);
+  }, [code, roomId, retryCount]);
   
   // Function to fetch poll votes
   const fetchPollVotes = async (activationId: string) => {
@@ -138,15 +165,19 @@ const Results: React.FC<ResultsProps> = ({ code: propCode }) => {
       setIsRefreshing(true);
       
       // Get all votes for this poll
-      const { data: voteData, error: voteError } = await supabase
-        .from('poll_votes')
-        .select('*')
-        .eq('activation_id', activationId);
+      const { data: voteData, error: voteError } = await retry(async () => {
+        return await supabase
+          .from('poll_votes')
+          .select('*')
+          .eq('activation_id', activationId);
+      }, 3);
         
       if (voteError) {
         console.error('Error fetching poll votes:', voteError);
         return;
       }
+      
+      console.log('Poll votes loaded:', voteData?.length || 0);
       
       // Count votes by option ID and text
       const votesById: {[key: string]: number} = {};
@@ -176,11 +207,17 @@ const Results: React.FC<ResultsProps> = ({ code: propCode }) => {
   
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100">
+      <div 
+        className="min-h-screen flex items-center justify-center"
+        style={{ 
+          background: `linear-gradient(to bottom right, ${theme.primary_color}, ${theme.secondary_color})`,
+          color: theme.text_color
+        }}
+      >
         <div className="text-center">
-          <Loader2 className="w-12 h-12 text-purple-600 animate-spin mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-gray-800 mb-2">Loading Results</h2>
-          <p className="text-gray-600">Please wait...</p>
+          <Loader2 className="w-12 h-12 text-white animate-spin mx-auto mb-4" />
+          <h2 className="text-xl font-semibold mb-2">Loading Results</h2>
+          <p className="text-white/70">Please wait...</p>
         </div>
       </div>
     );
@@ -188,11 +225,24 @@ const Results: React.FC<ResultsProps> = ({ code: propCode }) => {
   
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
-        <div className="bg-white rounded-lg shadow-md p-6 max-w-md w-full">
-          <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-gray-800 mb-2 text-center">Error</h2>
-          <p className="text-gray-600 mb-4 text-center">{error}</p>
+      <div 
+        className="min-h-screen flex items-center justify-center p-4"
+        style={{ 
+          background: `linear-gradient(to bottom right, ${theme.primary_color}, ${theme.secondary_color})`,
+          color: theme.text_color
+        }}
+      >
+        <div className="bg-white/20 backdrop-blur-sm rounded-xl p-8 max-w-md w-full text-center">
+          <AlertCircle className="w-12 h-12 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold mb-2">Error</h2>
+          <p className="mb-6">{error}</p>
+          
+          <button
+            onClick={() => { setRetryCount(prev => prev + 1); setLoading(true); setError(null); }}
+            className="px-4 py-2 bg-white/30 hover:bg-white/40 rounded-lg transition"
+          >
+            Try Again
+          </button>
         </div>
       </div>
     );
@@ -200,13 +250,26 @@ const Results: React.FC<ResultsProps> = ({ code: propCode }) => {
   
   if (!room) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
-        <div className="bg-white rounded-lg shadow-md p-6 max-w-md w-full">
-          <AlertCircle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-gray-800 mb-2 text-center">Room Not Found</h2>
-          <p className="text-gray-600 mb-4 text-center">
+      <div 
+        className="min-h-screen flex items-center justify-center p-4"
+        style={{ 
+          background: `linear-gradient(to bottom right, ${theme.primary_color}, ${theme.secondary_color})`,
+          color: theme.text_color
+        }}
+      >
+        <div className="bg-white/20 backdrop-blur-sm rounded-xl p-8 max-w-md w-full text-center">
+          <AlertCircle className="w-12 h-12 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold mb-2">Room Not Found</h2>
+          <p className="mb-6">
             The room with code {code} could not be found.
           </p>
+          
+          <button
+            onClick={() => { setRetryCount(prev => prev + 1); setLoading(true); }}
+            className="px-4 py-2 bg-white/30 hover:bg-white/40 rounded-lg transition"
+          >
+            Try Again
+          </button>
         </div>
       </div>
     );

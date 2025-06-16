@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase';
 import { useGameStore } from '../store/gameStore'; 
 import { useTheme } from '../context/ThemeContext';
 import NetworkStatus from './ui/NetworkStatus';
-import { AlertCircle, Loader2, Clock } from 'lucide-react';
+import { AlertCircle, Loader2, Clock, RefreshCw } from 'lucide-react';
 import MediaDisplay from './ui/MediaDisplay';
 import PollVoteForm from './ui/PollVoteForm';
 import { cn } from '../lib/utils';
@@ -19,6 +19,7 @@ const Game = () => {
   const [error, setError] = useState<string | null>(null);
   const [currentActivation, setCurrentActivation] = useState<any | null>(null);
   const [isConnected, setIsConnected] = useState(true);
+  const [retryCount, setRetryCount] = useState(0);
   
   // State for answer submission
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
@@ -38,20 +39,25 @@ const Game = () => {
   useEffect(() => {
     if (!roomId) return;
     
-    const loadCurrentActivation = async () => {
+    const loadGameSession = async () => {
       try {
         setLoading(true);
+        setError(null);
         
         // Get the current game session for this room
         const { data: gameSession, error: sessionError } = await supabase
           .from('game_sessions')
           .select('current_activation')
           .eq('room_id', roomId)
-          .single();
+          .maybeSingle();
           
         if (sessionError) {
-          console.error('Error fetching game session:', sessionError);
-          console.log('No game session found, showing waiting screen');
+          // If the error is not a "not found" error, log it
+          if (sessionError.code !== 'PGRST116') {
+            console.error('Error fetching game session:', sessionError);
+          } else {
+            console.log('No game session found, showing waiting screen');
+          }
           setCurrentActivation(null);
           setLoading(false);
           return;
@@ -59,35 +65,54 @@ const Game = () => {
         
         // If there's no current activation, show waiting screen
         if (!gameSession?.current_activation) {
+          console.log('No current activation in game session');
           setCurrentActivation(null);
           setLoading(false);
           return;
         }
         
-        // Get the current activation details
-        const { data: activation, error: activationError } = await supabase
-          .from('activations')
-          .select('*')
-          .eq('id', gameSession.current_activation)
-          .single();
-          
-        if (activationError) {
-          console.error('Error fetching activation:', activationError);
-          setError('Failed to load current question');
-          setLoading(false);
-          return;
-        }
+        console.log('Found current activation:', gameSession.current_activation);
         
-        setCurrentActivation(activation);
+        // Get the current activation details
+        try {
+          const { data: activation, error: activationError } = await supabase
+            .from('activations')
+            .select('*')
+            .eq('id', gameSession.current_activation)
+            .single();
+            
+          if (activationError) {
+            console.error('Error fetching activation:', activationError);
+            setError('Failed to load current question');
+            setLoading(false);
+            return;
+          }
+          
+          console.log('Activation loaded successfully:', activation);
+          setCurrentActivation(activation);
+        } catch (activationErr) {
+          console.error('Exception fetching activation:', activationErr);
+          setError('Failed to load current question');
+        }
+
         setLoading(false);
       } catch (err) {
         console.error('Error in loadCurrentActivation:', err);
-        setError('An unexpected error occurred');
+        
+        // Check if it's a network error
+        if (!navigator.onLine || (err instanceof TypeError && err.message === 'Failed to fetch')) {
+          setError('Network error. Please check your connection and try again.');
+          setIsConnected(false);
+        } else {
+          setError('An unexpected error occurred');
+        }
+        
         setLoading(false);
       }
     };
     
-    loadCurrentActivation();
+    // Load initial data
+    loadGameSession();
     
     // Set up subscription for game session changes
     const gameSessionSubscription = supabase.channel(`game_session_${roomId}`)
@@ -100,7 +125,7 @@ const Game = () => {
         // If current_activation changed, reload
         if (payload.new && payload.old && 
             payload.new.current_activation !== payload.old.current_activation) {
-          loadCurrentActivation();
+          loadGameSession();
         }
       })
       .subscribe();
@@ -115,7 +140,7 @@ const Game = () => {
       }, (payload) => {
         // If the current activation was updated, refresh it
         if (payload.new && currentActivation && payload.new.id === currentActivation.id) {
-          setCurrentActivation(payload.new);
+          setCurrentActivation(prev => ({...prev, ...payload.new}));
         }
       })
       .subscribe();
@@ -125,7 +150,7 @@ const Game = () => {
       gameSessionSubscription.unsubscribe();
       activationSubscription.unsubscribe();
     };
-  }, [roomId, currentActivation]);
+  }, [roomId, currentActivation, retryCount]);
   
   // Check if player is in this room
   useEffect(() => {
@@ -195,7 +220,7 @@ const Game = () => {
   // Loading state
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100">
+      <div className="min-h-screen flex items-center justify-center" style={{ background: `linear-gradient(to bottom right, ${theme.primary_color}, ${theme.secondary_color})` }}>
         <div className="text-center">
           <Loader2 className="w-12 h-12 text-purple-600 animate-spin mx-auto mb-4" />
           <h2 className="text-xl font-semibold text-gray-800 mb-2">Loading Game</h2>
@@ -208,15 +233,25 @@ const Game = () => {
   // Error state
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
-        <div className="bg-white rounded-lg shadow-md p-6 max-w-md w-full">
-          <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-gray-800 mb-2 text-center">Something went wrong</h2>
-          <p className="text-gray-600 mb-4 text-center">{error}</p>
-          <div className="flex justify-center">
-            <button
-              onClick={() => window.location.reload()}
-              className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700"
+      <div 
+        className="min-h-screen flex items-center justify-center p-4"
+        style={{ 
+          background: `linear-gradient(to bottom right, ${theme.primary_color}, ${theme.secondary_color})`,
+          color: theme.text_color
+        }}
+      >
+        <div className="bg-white/20 backdrop-blur-sm rounded-xl p-8 max-w-md w-full text-center">
+          <AlertCircle className="w-12 h-12 mx-auto mb-4" />
+          <h2 className="text-2xl font-bold mb-4">Something went wrong</h2>
+          <p className="mb-6">{error}</p>
+          
+          {!isConnected && (
+            <NetworkStatus onRetry={() => window.location.reload()} className="mb-6" />
+          )}
+          
+          <button
+            onClick={() => { setRetryCount(prev => prev + 1); setLoading(true); setError(null); }}
+            className="px-4 py-2 bg-white/30 hover:bg-white/40 rounded-lg transition flex items-center justify-center mx-auto"
             >
               Reload Page
             </button>
@@ -261,10 +296,11 @@ const Game = () => {
           )}
           
           <button
-            onClick={() => window.location.reload()}
+            onClick={() => { setRetryCount(prev => prev + 1); setLoading(true); }}
             className="px-4 py-2 bg-white/30 hover:bg-white/40 rounded-lg transition"
           >
-            Refresh
+            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+            {loading ? 'Refreshing...' : 'Refresh'}
           </button>
         </div>
       </div>
