@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { retry, isNetworkError, logError } from '../lib/error-handling';
 
@@ -100,10 +100,6 @@ export function usePollManager({
       }
     } catch (err) {
       console.error('Error fetching poll state:', err);
-    }
-    
-    if (debugMode) {
-      console.log(`[${debugIdRef.current}] Initializing poll for activation: ${activationId}, player: ${playerId || 'none'}, room: ${roomId || 'none'}, interval: ${pollingInterval}ms`);
     }
     
     // Don't fetch too frequently (throttle to once per second)
