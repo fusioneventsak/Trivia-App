@@ -252,10 +252,9 @@ const Game = () => {
           <button
             onClick={() => { setRetryCount(prev => prev + 1); setLoading(true); setError(null); }}
             className="px-4 py-2 bg-white/30 hover:bg-white/40 rounded-lg transition flex items-center justify-center mx-auto"
-            >
-              Reload Page
-            </button>
-          </div>
+          >
+            Reload Page
+          </button>
         </div>
       </div>
     );

@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { WifiOff, Wifi, RefreshCw } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { cn } from '../../lib/utils';
 
 interface NetworkStatusProps {
   onRetry?: () => void;
-  className?: string;
   className?: string;
 }
 
@@ -52,7 +50,6 @@ const NetworkStatus: React.FC<NetworkStatusProps> = ({ onRetry, className }) => 
     <div 
       className={cn(
         "flex items-center justify-between p-3 rounded-lg text-sm",
-        isOnline ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700", 
         isOnline ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700", 
         className
       )}
