@@ -19,6 +19,7 @@ const Game = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentActivation, setCurrentActivation] = useState<any | null>(null);
+  const [loadingTimeout, setLoadingTimeout] = useState<NodeJS.Timeout | null>(null);
   const [isConnected, setIsConnected] = useState(true);
   const [retryCount, setRetryCount] = useState(0);
   
@@ -39,6 +40,13 @@ const Game = () => {
   // Load current activation for this room
   useEffect(() => {
     if (!roomId) return;
+    
+    // Set a timeout to prevent infinite loading state
+    const timeout = setTimeout(() => {
+      setLoading(false);
+    }, 10000); // 10 second timeout
+    
+    setLoadingTimeout(timeout);
     
     const loadGameSession = async () => {
       try {
@@ -69,6 +77,7 @@ const Game = () => {
           }
           setCurrentActivation(null);
           setLoading(false);
+          if (loadingTimeout) clearTimeout(loadingTimeout);
           return;
         }
         
@@ -76,7 +85,8 @@ const Game = () => {
         if (!gameSession?.current_activation) {
           console.log('No current activation in game session');
           setCurrentActivation(null);
-          setLoading(false);
+          setLoading(false); 
+          if (loadingTimeout) clearTimeout(loadingTimeout);
           return;
         }
         
@@ -105,11 +115,13 @@ const Game = () => {
           console.log('Activation loaded successfully:', activation);
           setCurrentActivation(activation);
         } catch (activationErr) {
-          console.error('Exception fetching activation:', activationErr);
-          throw new Error('Failed to load current question');
+          console.error('Exception fetching activation:', activationErr); 
+          // Don't throw here, just set current activation to null
+          setCurrentActivation(null);
         }
 
         setLoading(false);
+        if (loadingTimeout) clearTimeout(loadingTimeout);
       } catch (err) {
         console.error('Error in loadCurrentActivation:', err);
         
@@ -122,6 +134,7 @@ const Game = () => {
         }
         
         setLoading(false);
+        if (loadingTimeout) clearTimeout(loadingTimeout);
       }
     };
     
@@ -162,8 +175,9 @@ const Game = () => {
     return () => {
       gameSessionSubscription.unsubscribe();
       activationSubscription.unsubscribe();
+      if (loadingTimeout) clearTimeout(loadingTimeout);
     };
-  }, [roomId, currentActivation, retryCount]);
+  }, [roomId, currentActivation, retryCount, loadingTimeout]);
   
   // Reset state when activation changes
   useEffect(() => {
@@ -250,11 +264,20 @@ const Game = () => {
   // Loading state
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: `linear-gradient(to bottom right, ${theme.primary_color}, ${theme.secondary_color})` }}>
-        <div className="text-center">
-          <Loader2 className="w-12 h-12 text-purple-600 animate-spin mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-gray-800 mb-2">Loading Game</h2>
-          <p className="text-gray-600">Please wait while we set things up...</p>
+      <div 
+        className="min-h-screen flex items-center justify-center" 
+        style={{ background: `linear-gradient(to bottom right, ${theme.primary_color}, ${theme.secondary_color})` }}
+      >
+        <div className="text-center text-white">
+          <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4" />
+          <h2 className="text-xl font-semibold mb-2">Loading Game</h2>
+          <p className="opacity-80">Please wait while we set things up...</p>
+          <button 
+            onClick={() => setLoading(false)} 
+            className="mt-4 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition"
+          >
+            Skip Loading
+          </button>
         </div>
       </div>
     );
