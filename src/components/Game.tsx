@@ -314,28 +314,12 @@ const Game = () => {
           {/* Render different UI based on activation type */}
           {currentActivation?.type === 'poll' && (
             <div className="space-y-4">
-              {/* Use PollVoteForm component */}
-              <PollVoteForm
-                options={currentActivation.options || []}
-                onVote={async (optionId, optionText) => {
-                  try {
-                    // Use the poll manager hook to submit vote
-                    const pollManager = usePollManager({
-                      activationId: currentActivation.id,
-                      options: currentActivation.options,
-                      playerId: currentPlayerId,
-                      roomId
-                    });
-                    
-                    const result = await pollManager.submitVote(optionId);
-                    return result;
-                  } catch (error) {
-                    console.error('Error submitting vote:', error);
-                    return { success: false, error: 'Failed to submit vote' };
-                  }
-                }}
-                disabled={currentActivation.poll_state !== 'voting'}
-                themeColors={room?.theme || theme}
+              {/* Use the PollVoteForm component with usePollManager hook */}
+              <PollVotingSection 
+                activation={currentActivation}
+                playerId={currentPlayerId}
+                roomId={roomId}
+                theme={theme}
               />
             </div>
           )}
@@ -584,6 +568,44 @@ const Game = () => {
       setSubmittingAnswer(false);
     }
   }
+};
+
+// Separate component for poll voting that uses the usePollManager hook
+const PollVotingSection: React.FC<{
+  activation: any;
+  playerId: string | null;
+  roomId: string | undefined;
+  theme: any;
+}> = ({ activation, playerId, roomId, theme }) => {
+  // Use the poll manager hook properly
+  const {
+    hasVoted,
+    selectedOptionId,
+    pollState,
+    submitVote
+  } = usePollManager({
+    activationId: activation.id,
+    options: activation.options || [],
+    playerId,
+    roomId
+  });
+  
+  return (
+    <PollVoteForm
+      options={activation.options || []}
+      onVote={async (optionId, optionText) => {
+        try {
+          const result = await submitVote(optionId);
+          return result;
+        } catch (error) {
+          console.error('Error submitting vote:', error);
+          return { success: false, error: 'Failed to submit vote' };
+        }
+      }}
+      disabled={pollState !== 'voting'}
+      themeColors={theme}
+    />
+  );
 };
 
 export default Game;
