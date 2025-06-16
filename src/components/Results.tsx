@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { supabase } from '../lib/supabase';
+import { usePollManager } from '../hooks/usePollManager';
 import { retry, isNetworkError, logError } from '../lib/error-handling';
 
 interface PollOption {
