@@ -1,21 +1,64 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useRoomStore } from '../store/roomStore';
-import { PlusCircle, LayoutGrid, Users, Activity, Calendar, BarChart4, RefreshCw, ArrowRight, Briefcase, AlertCircle, WifiOff } from 'lucide-react';
-import { supabase, checkSupabaseConnection } from '../lib/supabase';
-import { useCustomer } from '../context/CustomerContext';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { supabase } from '../lib/supabase';
+import { retry, isNetworkError, logError } from '../lib/error-handling';
 
-export default function Dashboard() {
-  const navigate = useNavigate();
-  const { rooms, fetchRooms } = useRoomStore();
-  const { navigateToCustomer } = useCustomer();
-  const [stats, setStats] = useState({
-    totalPlayers: 0,
-    totalActivations: 0,
-    totalRooms: 0,
-    activeRooms: 0
-  });
-  const [loading, setLoading] = useState(true);
+interface PollOption {
+  id?: string;
+  text: string;
+  media_type?: 'none' | 'image' | 'gif';
+  media_url?: string;
+}
+
+interface PollVote {
+  id: string;
+  activation_id: string;
+  player_id: string;
+  option_id: string;
+  option_text: string;
+  created_at?: string;
+}
+
+interface PollVoteCount {
+  [optionId: string]: number;
+}
+
+interface UsePollManagerProps {
+  activationId: string | null;
+  options?: PollOption[];
+  playerId?: string | null;
+  roomId?: string | null;
+  debugMode?: boolean;
+}
+
+interface UsePollManagerReturn {
+  votes: PollVoteCount;
+  votesByText: { [text: string]: number };
+  totalVotes: number;
+  hasVoted: boolean;
+  selectedOptionId: string | null;
+  pollState: 'pending' | 'voting' | 'closed';
+  isLoading: boolean;
+  lastUpdated: number;
+  pollingInterval: number;
+  submitVote: (optionId: string) => Promise<{ success: boolean; error?: string }>;
+  resetPoll: () => void;
+}
+
+export function usePollManager({ 
+  activationId, 
+  options = [], 
+  playerId,
+  roomId,
+  debugMode = false
+}: UsePollManagerProps): UsePollManagerReturn {
+  const [votes, setVotes] = useState<PollVoteCount>({});
+  const [votesByText, setVotesByText] = useState<{ [text: string]: number }>({});
+  const [hasVoted, setHasVoted] = useState(false);
+  const [selectedOptionId, setSelectedOptionId] = useState<string | null>(null);
+  const [pollState, setPollState] = useState<'pending' | 'voting' | 'closed'>('pending');
+  const [isLoading, setIsLoading] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<number>(Date.now());
+  const [pollingInterval, setPollingInterval] = useState<number>(2000); // Start with 2 seconds
   const [recentActivity, setRecentActivity] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<{ isConnected: boolean, message: string | null }>({
@@ -23,438 +66,520 @@ export default function Dashboard() {
     message: null
   });
   
-  // Check connection status on component mount
-  useEffect(() => {
-    const checkConnection = async () => {
-      const status = await checkSupabaseConnection();
-      setConnectionStatus(status);
-      
-      if (status.isConnected) {
-        // Only fetch data if connection is successful
-        fetchRooms();
-        fetchStats();
-        fetchRecentActivity();
+  const currentActivationIdRef = useRef<string | null>(null);
+  const debugIdRef = useRef<string>(`poll-${Math.random().toString(36).substring(2, 7)}`);
+  const pollingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastFetchTimeRef = useRef<number>(0);
+  const errorCountRef = useRef<number>(0);
+  const voteCountRef = useRef<number>(0);
+  const noChangeCountRef = useRef<number>(0);
+  const lastVoteCountRef = useRef<number>(0);
+  const lastVotesRef = useRef<PollVoteCount>({});
+  const lastVotesByTextRef = useRef<{ [text: string]: number }>({});
+  const subscriptionRef = useRef<any>(null);
+
+  // Initialize poll data
+  const initializePoll = useCallback(async () => {
+    if (!activationId) return;
+    
+    if (debugMode) {
+      console.log(`[${debugIdRef.current}] Initializing poll for activation: ${activationId}, player: ${playerId || 'none'}, room: ${roomId || 'none'}, interval: ${pollingInterval}ms`);
+    }
+   
+    // Force poll state update from database
+    try {
+      const { data: activation, error } = await supabase
+        .from('activations')
+        .select('poll_state')
+        .eq('id', activationId)
+        .single();
+        
+      if (!error && activation && activation.poll_state) {
+       if (debugMode && pollState !== activation.poll_state) {
+         console.log(`[${debugIdRef.current}] Poll state changed: ${pollState} -> ${activation.poll_state}`);
+       }
+        setPollState(activation.poll_state);
+        
+        if (debugMode) {
+          console.log(`[${debugIdRef.current}] Updated poll state from database: ${activation.poll_state}`);
+        }
       }
+    } catch (err) {
+      console.error('Error fetching poll state:', err);
+    }
+    
+    if (debugMode) {
+      console.log(`[${debugIdRef.current}] Initializing poll for activation: ${activationId}, player: ${playerId || 'none'}, room: ${roomId || 'none'}, interval: ${pollingInterval}ms`);
+    }
+    
+    // Don't fetch too frequently (throttle to once per second)
+    const now = Date.now();
+    if (now - lastFetchTimeRef.current < 1000) {
+      if (debugMode) {
+        console.log(`[${debugIdRef.current}] Skipping poll fetch - throttled`);
+      }
+      return;
+    }
+    lastFetchTimeRef.current = now;
+    
+    setIsLoading(true);
+    try {
+      // Use retry for better error handling
+      const { data: activation, error: activationError } = await retry(async () => {
+        return await supabase
+          .from('activations')
+          .select('poll_state, options')
+          .eq('id', activationId)
+          .single();
+      }, 2);
+      
+      if (activationError) {
+        console.error(`[${debugIdRef.current}] Error fetching activation:`, activationError);
+        errorCountRef.current++;
+        
+        // If we've had multiple consecutive errors, increase polling interval
+        if (errorCountRef.current >= 3) {
+          const newInterval = Math.min(30000, pollingInterval * 2); // Max 30 seconds
+          if (newInterval !== pollingInterval) {
+            if (debugMode) {
+              console.log(`[${debugIdRef.current}] Increasing polling interval due to errors: ${pollingInterval}ms -> ${newInterval}ms`);
+            }
+            setPollingInterval(newInterval);
+          }
+        }
+        return;
+      } else if (activation) {
+        if (debugMode) {
+          console.log(`[${debugIdRef.current}] Activation fetched successfully. Poll state: ${activation.poll_state}`);
+        }
+        setPollState(activation.poll_state || 'pending');
+        
+        // Reset error count on successful fetch
+        errorCountRef.current = 0;
+        
+        // Initialize vote counts
+        const voteCounts: PollVoteCount = {};
+        const textVoteCounts: { [text: string]: number } = {};
+        
+        // Use options from activation or props
+        const pollOptions = activation.options || options;
+        
+        // Initialize all options to 0
+        pollOptions.forEach((option: PollOption) => {
+          if (option.id) {
+            voteCounts[option.id] = 0;
+          }
+          textVoteCounts[option.text] = 0;
+        });
+
+        // Get all votes for this poll
+        const { data: voteData, error: voteError } = await retry(async () => {
+          return await supabase
+            .from('poll_votes')
+            .select('*')
+            .eq('activation_id', activationId);
+        }, 2);
+
+        if (voteError) {
+          console.error(`[${debugIdRef.current}] Error fetching votes:`, voteError);
+          errorCountRef.current++;
+          return;
+        } else if (voteData) {
+          const currentVoteCount = voteData.length;
+          
+          // Check if vote count has changed
+          if (currentVoteCount === lastVoteCountRef.current) {
+            // No change in vote count
+            noChangeCountRef.current++;
+            
+            if (debugMode) {
+              console.log(`[${debugIdRef.current}] No change in vote count (${currentVoteCount}), consecutive no-changes: ${noChangeCountRef.current}, current interval: ${pollingInterval}ms`);
+            }
+            
+            // If no changes for several polls, increase polling interval
+            if (noChangeCountRef.current >= 3 && pollState === 'voting') {
+              const newInterval = Math.min(10000, Math.round(pollingInterval * 1.5)); // Max 10 seconds
+              if (newInterval !== pollingInterval) {
+                if (debugMode) {
+                  console.log(`[${debugIdRef.current}] Increasing polling interval due to inactivity: ${pollingInterval}ms -> ${newInterval}ms`);
+                }
+                setPollingInterval(newInterval);
+              }
+            }
+            
+            // If no changes and we already have vote data, skip processing
+            if (Object.keys(lastVotesRef.current).length > 0) {
+              setIsLoading(false);
+              return;
+            }
+          } else {
+            // Vote count changed, reset counters and polling interval
+            noChangeCountRef.current = 0;
+            lastVoteCountRef.current = currentVoteCount;
+            
+            if (pollingInterval > 2000) {
+              if (debugMode) {
+                console.log(`[${debugIdRef.current}] Vote count changed, resetting polling interval to 2000ms`);
+              }
+              setPollingInterval(2000);
+            }
+          }
+          
+          if (debugMode) {
+            console.log(`[${debugIdRef.current}] Fetched ${voteData.length} votes for activation ${activationId}`);
+          }
+          
+          // Count votes
+          voteData.forEach((vote: PollVote) => {
+            // Count by option ID if available
+            if (vote.option_id && voteCounts[vote.option_id] !== undefined) {
+              voteCounts[vote.option_id]++;
+            }
+            
+            // Always count by option text
+            if (vote.option_text && textVoteCounts[vote.option_text] !== undefined) {
+              textVoteCounts[vote.option_text]++;
+            }
+            
+            // Check if current player has voted
+            if (playerId && vote.player_id === playerId) {
+              setHasVoted(true);
+              setSelectedOptionId(vote.option_id);
+            }
+          });
+          
+          // Store the vote count for comparison
+          voteCountRef.current = voteData.length;
+          
+          // Update refs for comparison in next poll
+          lastVotesRef.current = voteCounts;
+          lastVotesByTextRef.current = textVoteCounts;
+        }
+
+        setVotes(voteCounts);
+        setVotesByText(textVoteCounts);
+        setLastUpdated(Date.now());
+        
+        if (debugMode) {
+          console.log(`[${debugIdRef.current}] Poll initialized with ${Object.values(textVoteCounts).reduce((sum, count) => sum + count, 0)} total votes`);
+          console.log(`[${debugIdRef.current}] Vote counts by text:`, textVoteCounts);
+        }
+      }
+    } catch (error) {
+      console.error(`[${debugIdRef.current}] Error initializing poll:`, error);
+      logError(error, 'usePollManager.initializePoll', playerId || undefined);
+      errorCountRef.current++;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [activationId, options, playerId, roomId, pollingInterval, debugMode, pollState]);
+
+  // Reset poll state
+  const resetPoll = useCallback(() => {
+    if (debugMode) {
+      console.log(`[${debugIdRef.current}] Resetting poll state`);
+    }
+    setVotes({});
+    setVotesByText({});
+    setHasVoted(false);
+    setSelectedOptionId(null);
+    setPollState('pending');
+    setPollingInterval(2000); // Reset to default interval
+    noChangeCountRef.current = 0;
+    lastVoteCountRef.current = 0;
+    errorCountRef.current = 0;
+    lastVotesRef.current = {};
+    lastVotesByTextRef.current = {};
+
+    // Clear polling timeout
+    if (pollingTimeoutRef.current) {
+      clearTimeout(pollingTimeoutRef.current);
+      pollingTimeoutRef.current = null;
+    }
+    
+    // Clear subscription
+    if (subscriptionRef.current) {
+      subscriptionRef.current.unsubscribe();
+      subscriptionRef.current = null;
+    }
+  }, [debugMode]);
+
+  // Effect to handle activation changes
+  useEffect(() => {
+    if (activationId !== currentActivationIdRef.current) {
+      if (debugMode) {
+        console.log(`[${debugIdRef.current}] Activation changed from ${currentActivationIdRef.current} to ${activationId}`);
+      }
+      currentActivationIdRef.current = activationId;
+      resetPoll();
+    }
+  }, [activationId, resetPoll, debugMode]);
+
+  // Set up polling and subscriptions
+  useEffect(() => {
+    if (!activationId) return;
+    
+    if (debugMode) {
+      console.log(`[${debugIdRef.current}] Setting up poll for activation ${activationId}`);
+    }
+    
+    // Initial fetch
+    initializePoll();
+    
+    // Set up polling with dynamic interval
+    const setupPolling = () => {
+      // Clear any existing timeout
+      if (pollingTimeoutRef.current) {
+        clearTimeout(pollingTimeoutRef.current);
+      }
+      
+      // Set new timeout with current interval
+      pollingTimeoutRef.current = setTimeout(() => {
+        initializePoll().finally(() => {
+          // Continue polling
+          setupPolling();
+        });
+      }, pollingInterval);
     };
     
-    checkConnection();
-  }, [fetchRooms]);
-  
-  const fetchStats = async () => {
+    // Start polling
+    setupPolling();
+    
+    // Set up subscription for real-time updates as a fallback/enhancement
     try {
-      setLoading(true);
-      setError(null);
-      
-      // Get total players
-      const { count: playersCount, error: playersError } = await supabase
-        .from('players')
-        .select('*', { count: 'exact', head: true });
+      // Subscribe to poll votes for this activation
+      subscriptionRef.current = supabase.channel(`poll_votes_${activationId}`)
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'poll_votes',
+          filter: `activation_id=eq.${activationId}`
+        }, () => {
+          // When a new vote comes in, reset to fast polling
+          if (pollingInterval > 2000) {
+            if (debugMode) {
+              console.log(`[${debugIdRef.current}] New vote detected via subscription, resetting polling interval to 2000ms`);
+            }
+            setPollingInterval(2000);
+            noChangeCountRef.current = 0;
+          }
+          
+          // Trigger an immediate poll to get the latest data
+          initializePoll();
+        })
+        .subscribe();
         
-      if (playersError) throw playersError;
-        
-      // Get total activations
-      const { count: activationsCount, error: activationsError } = await supabase
-        .from('activations')
-        .select('*', { count: 'exact', head: true });
-        
-      if (activationsError) throw activationsError;
-        
-      // Room stats are from the store
-      const roomsData = await supabase
-        .from('rooms')
-        .select('*');
-      
-      if (roomsData.error) throw roomsData.error;
-        
-      setStats({
-        totalPlayers: playersCount || 0,
-        totalActivations: activationsCount || 0,
-        totalRooms: roomsData.data?.length || 0,
-        activeRooms: roomsData.data?.filter(r => r.is_active).length || 0
-      });
-      
-    } catch (error: any) {
-      console.error('Error fetching stats:', error);
-      setError('Failed to load statistics data');
-    } finally {
-      setLoading(false);
+      // Subscribe to activation changes for poll state updates
+      supabase.channel(`activation_${activationId}`)
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'activations',
+          filter: `id=eq.${activationId}`
+        }, (payload) => {
+          if (payload.new && payload.new.poll_state !== payload.old?.poll_state) {
+            if (debugMode) {
+              console.log(`[${debugIdRef.current}] Poll state changed: ${payload.old?.poll_state} -> ${payload.new.poll_state}`);
+            }
+            setPollState(payload.new.poll_state || 'pending');
+            
+            // When poll state changes to voting, force an immediate poll
+            if (payload.new.poll_state === 'voting') {
+              if (debugMode) {
+                console.log(`[${debugIdRef.current}] Poll state changed to voting, forcing immediate poll`);
+              }
+              initializePoll();
+            }
+            
+            // Reset to fast polling when state changes
+            if (pollingInterval > 2000) {
+              setPollingInterval(2000);
+              noChangeCountRef.current = 0;
+            }
+            
+            // Trigger an immediate poll
+            initializePoll();
+          }
+        })
+        .subscribe();
+    } catch (error) {
+      console.error(`[${debugIdRef.current}] Error setting up subscriptions:`, error);
+      // If subscriptions fail, we still have polling as a fallback
     }
-  };
-  
-  const fetchRecentActivity = async () => {
+    
+    // Cleanup
+    return () => {
+      if (debugMode) {
+        console.log(`[${debugIdRef.current}] Cleaning up poll for activation ${activationId}`);
+      }
+      
+      // Clear polling timeout
+      if (pollingTimeoutRef.current) {
+        clearTimeout(pollingTimeoutRef.current);
+        pollingTimeoutRef.current = null;
+      }
+      
+      // Unsubscribe from channels
+      if (subscriptionRef.current) {
+        subscriptionRef.current.unsubscribe();
+        subscriptionRef.current = null;
+      }
+    };
+  }, [activationId, pollingInterval, initializePoll, debugMode]);
+
+  // Submit vote
+  const submitVote = useCallback(async (optionId: string): Promise<{ success: boolean; error?: string }> => {
+    if (debugMode) {
+      console.log(`[${debugIdRef.current}] Submitting vote for option ${optionId}`);
+    }
+    
+    if (!activationId || !playerId) {
+      return { success: false, error: 'Missing activation or player ID' };
+    }
+
+    if (hasVoted) {
+      return { success: false, error: 'You have already voted' };
+    }
+
+    if (pollState !== 'voting') {
+      return { success: false, error: 'Voting is not open' };
+    }
+
     try {
-      setError(null);
-      
-      // Get recent player joins
-      const { data: playerJoins, error: playerError } = await supabase
-        .from('players')
-        .select('id, name, created_at, room_id, rooms(name, customer_id)')
-        .order('created_at', { ascending: false })
-        .limit(5);
+      // Use retry for better error handling
+      return await retry(async () => {
+        // Find the option
+        const option = options.find(opt => opt.id === optionId);
+        if (!option) {
+          return { success: false, error: 'Invalid option' };
+        }
+
+        if (debugMode) {
+          console.log(`[${debugIdRef.current}] Submitting vote:`, { activationId, playerId, optionId, optionText: option.text });
+        }
+
+        // Submit the vote
+        const { error } = await supabase
+          .from('poll_votes')
+          .insert({
+            activation_id: activationId,
+            player_id: playerId,
+            option_id: optionId,
+            option_text: option.text
+          });
+
+        if (error) {
+          // Check for duplicate vote
+          if (error.code === '23505') {
+            if (debugMode) {
+              console.log(`[${debugIdRef.current}] Duplicate vote detected`);
+            }
+            return { success: false, error: 'You have already voted in this poll' };
+          }
+          throw error;
+        }
+
+        // Update local state immediately for optimistic UI
+        setHasVoted(true);
+        setSelectedOptionId(optionId);
         
-      if (playerError) throw playerError;
+        // Update vote counts immediately
+        setVotes(prev => ({
+          ...prev,
+          [optionId]: (prev[optionId] || 0) + 1
+        }));
         
-      // Get recent activations
-      const { data: recentActivations, error: activationsError } = await supabase
-        .from('activations')
-        .select('id, question, created_at, type, room_id, rooms(name, customer_id)')
-        .eq('is_template', false)
-        .order('created_at', { ascending: false })
-        .limit(5);
+        setVotesByText(prev => ({
+          ...prev,
+          [option.text]: (prev[option.text] || 0) + 1
+        }));
         
-      if (activationsError) throw activationsError;
+        // Reset to fast polling
+        if (pollingInterval > 2000) {
+          if (debugMode) {
+            console.log(`[${debugIdRef.current}] Vote submitted, resetting polling interval to 2000ms`);
+          }
+          setPollingInterval(2000);
+          noChangeCountRef.current = 0;
+        }
         
-      // Combine and sort by date
-      const combined = [
-        ...(playerJoins || []).map(player => ({
-          type: 'player_join',
-          id: player.id,
-          name: player.name,
-          roomName: player.rooms?.name || 'Unknown Room',
-          roomId: player.room_id,
-          customerId: player.rooms?.customer_id || 'ak',
-          created_at: player.created_at
-        })),
-        ...(recentActivations || []).map(activation => ({
-          type: 'activation',
-          id: activation.id,
-          question: activation.question,
-          activationType: activation.type,
-          roomName: activation.rooms?.name || 'Unknown Room',
-          roomId: activation.room_id,
-          customerId: activation.rooms?.customer_id || 'ak',
-          created_at: activation.created_at
-        }))
-      ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-       .slice(0, 5);
-      
-      setRecentActivity(combined);
+        // Force a refresh to get the latest data
+        setTimeout(initializePoll, 500);
+        
+        if (debugMode) {
+          console.log(`[${debugIdRef.current}] Vote submitted successfully`);
+        }
+        
+        return { success: true };
+      }, 3);
     } catch (error: any) {
-      console.error('Error fetching recent activity:', error);
-      setError('Failed to load recent activity');
+      console.error(`[${debugIdRef.current}] Error submitting vote:`, error);
+      logError(error, 'usePollManager.submitVote', playerId);
+      
+      // Check if it's a network error
+      if (isNetworkError(error)) {
+        // Store the vote in local storage for later retry
+        try {
+          const pendingVotes = JSON.parse(localStorage.getItem('pendingPollVotes') || '[]');
+          pendingVotes.push({
+            activation_id: activationId,
+            player_id: playerId,
+            option_id: optionId,
+            option_text: options.find(opt => opt.id === optionId)?.text || '',
+            created_at: new Date().toISOString()
+          });
+          localStorage.setItem('pendingPollVotes', JSON.stringify(pendingVotes));
+          
+          // Update UI optimistically
+          if (debugMode) {
+            console.log(`[${debugIdRef.current}] Vote saved locally due to network error`);
+          }
+          setHasVoted(true);
+          setSelectedOptionId(optionId);
+          
+          return { 
+            success: true, 
+            error: 'Your vote was saved locally and will be submitted when connection is restored.' 
+          };
+        } catch (storageError) {
+          console.error('Error saving vote to local storage:', storageError);
+        }
+        
+        return { 
+          success: false, 
+          error: 'Network error. Your vote will be saved when connection is restored.' 
+        };
+      }
+      
+      return { 
+        success: false, 
+        error: error.message || 'Failed to submit vote. Please try again.' 
+      };
     }
-  };
-  
-  // Retry connection and data fetch
-  const handleRetryConnection = async () => {
-    setLoading(true);
-    setError(null);
-    
-    const status = await checkSupabaseConnection();
-    setConnectionStatus(status);
-    
-    if (status.isConnected) {
-      // Retry all data fetching
-      await Promise.all([
-        fetchRooms(),
-        fetchStats(),
-        fetchRecentActivity()
-      ]);
-    }
-    
-    setLoading(false);
-  };
-  
-  // Use the CustomerContext's navigateToCustomer function
-  const handleRoomClick = (room: any) => {
-    // Navigate to the activation manager for this room
-    navigate(`/ak/admin/activations/${room.id}`);
-  };
-  
-  // Handle activity item click
-  const handleActivityClick = (customerId: string) => {
-    navigateToCustomer(customerId, 'admin');
-  };
+  }, [activationId, playerId, hasVoted, pollState, options, pollingInterval, initializePoll, debugMode]);
 
-  // Group rooms by customer for easier navigation
-  const roomsByCustomer = rooms.reduce((acc: {[key: string]: any[]}, room) => {
-    const customerId = room.customer_id || 'ak';
-    if (!acc[customerId]) {
-      acc[customerId] = [];
+  // Calculate total votes
+  const getTotalVotes = useCallback((): number => {
+    // Use votesByText as the source of truth
+    if (debugMode) {
+      console.log(`[${debugIdRef.current}] Calculating total votes from:`, votesByText);
     }
-    acc[customerId].push(room);
-    return acc;
-  }, {});
+    return Object.values(votesByText).reduce((sum, count) => sum + count, 0);
+  }, [votesByText, debugMode]);
 
-  const handleCreateRoom = () => {
-    navigate('/ak/admin/rooms/create');
+  return {
+    votes,
+    votesByText,
+    totalVotes: getTotalVotes(),
+    hasVoted,
+    selectedOptionId,
+    pollState,
+    isLoading,
+    lastUpdated,
+    pollingInterval,
+    submitVote,
+    resetPoll
   };
-  
-  // If there's a connection error, show a friendly message
-  if (!connectionStatus.isConnected) {
-    return (
-      <div className="p-6">
-        <div className="p-8 bg-red-50 rounded-lg shadow-sm text-center">
-          <div className="flex justify-center mb-4">
-            <div className="p-3 bg-red-100 rounded-full">
-              <WifiOff className="w-10 h-10 text-red-600" />
-            </div>
-          </div>
-          <h2 className="text-xl font-semibold text-red-700 mb-2">Connection Error</h2>
-          <p className="text-gray-700 mb-6">{connectionStatus.message || 'Unable to connect to the Supabase backend.'}</p>
-          <p className="text-gray-600 mb-6">
-            This might be due to network issues or the Supabase project being unavailable.
-            Please check your internet connection and Supabase configuration.
-          </p>
-          <button
-            onClick={handleRetryConnection}
-            className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 flex items-center justify-center mx-auto"
-          >
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Retry Connection
-          </button>
-        </div>
-      </div>
-    );
-  }
-  
-  return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-800">Dashboard</h1>
-        <button
-          onClick={handleCreateRoom}
-          className="flex items-center px-4 py-2 text-white bg-purple-600 rounded-lg hover:bg-purple-700"
-        >
-          <PlusCircle className="w-5 h-5 mr-2" />
-          Create Room
-        </button>
-      </div>
-      
-      {/* Error message */}
-      {error && (
-        <div className="mb-6 p-4 bg-red-100 text-red-700 rounded-lg flex items-center">
-          <AlertCircle className="w-5 h-5 mr-2" />
-          <div>
-            <p>{error}</p>
-            <button 
-              onClick={handleRetryConnection}
-              className="text-sm underline mt-1 flex items-center"
-            >
-              <RefreshCw className="w-3 h-3 mr-1" /> Retry
-            </button>
-          </div>
-        </div>
-      )}
-      
-      {/* Quick Access Panel */}
-      <div className="mb-6 p-4 bg-white rounded-lg shadow-sm border-l-4 border-purple-500">
-        <h2 className="text-lg font-semibold text-gray-800 mb-3">Quick Access</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-          <button 
-            onClick={() => navigateToCustomer('ak', 'admin')}
-            className="flex items-center justify-between p-3 bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 transition"
-          >
-            <div className="flex items-center">
-              <LayoutGrid className="w-5 h-5 mr-2" />
-              <span className="font-medium">Master Admin</span>
-            </div>
-            <ArrowRight className="w-4 h-4" />
-          </button>
-          
-          {Object.keys(roomsByCustomer).slice(0, 3).map(customerId => (
-            customerId !== 'ak' && (
-              <button 
-                key={customerId}
-                onClick={() => navigateToCustomer(customerId, 'admin')}
-                className="flex items-center justify-between p-3 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition"
-              >
-                <div className="flex items-center">
-                  <LayoutGrid className="w-5 h-5 mr-2" />
-                  <span className="font-medium">{customerId} Admin</span>
-                </div>
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            )
-          ))}
-        </div>
-      </div>
-      
-      {/* Stats Overview */}
-      <div className="grid grid-cols-1 gap-6 mb-6 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="p-6 bg-white rounded-lg shadow-sm">
-          <div className="flex items-center">
-            <div className="p-3 mr-4 bg-purple-100 rounded-full">
-              <LayoutGrid className="w-6 h-6 text-purple-600" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-gray-500">Rooms</p>
-              <p className="text-2xl font-semibold text-gray-700">{stats.totalRooms}</p>
-            </div>
-          </div>
-          <div className="mt-2 text-xs text-green-600">
-            {stats.activeRooms} active
-          </div>
-        </div>
-        
-        <div className="p-6 bg-white rounded-lg shadow-sm">
-          <div className="flex items-center">
-            <div className="p-3 mr-4 bg-blue-100 rounded-full">
-              <Users className="w-6 h-6 text-blue-600" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-gray-500">Players</p>
-              <p className="text-2xl font-semibold text-gray-700">{stats.totalPlayers}</p>
-            </div>
-          </div>
-        </div>
-        
-        <div className="p-6 bg-white rounded-lg shadow-sm">
-          <div className="flex items-center">
-            <div className="p-3 mr-4 bg-green-100 rounded-full">
-              <BarChart4 className="w-6 h-6 text-green-600" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-gray-500">Activations</p>
-              <p className="text-2xl font-semibold text-gray-700">{stats.totalActivations}</p>
-            </div>
-          </div>
-        </div>
-        
-        <div className="p-6 bg-white rounded-lg shadow-sm">
-          <div className="flex items-center">
-            <div className="p-3 mr-4 bg-orange-100 rounded-full">
-              <Calendar className="w-6 h-6 text-orange-600" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-gray-500">Today</p>
-              <p className="text-2xl font-semibold text-gray-700">{new Date().toLocaleDateString()}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-      
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* Recent Rooms */}
-        <div className="p-6 bg-white rounded-lg shadow-sm lg:col-span-2">
-          <h2 className="mb-4 text-lg font-semibold text-gray-800">Recent Rooms</h2>
-          
-          {loading ? (
-            <div className="flex items-center justify-center h-40">
-              <div className="w-8 h-8 border-4 border-gray-200 border-t-purple-600 rounded-full animate-spin"></div>
-            </div>
-          ) : rooms.length === 0 ? (
-            <div className="flex flex-col items-center justify-center p-8 bg-gray-50 rounded-lg">
-              <LayoutGrid className="w-12 h-12 mb-3 text-gray-400" />
-              <p className="mb-4 text-gray-600">No rooms created yet</p>
-              <button
-                onClick={handleCreateRoom}
-                className="px-4 py-2 text-white bg-purple-600 rounded-md hover:bg-purple-700"
-              >
-                Create Your First Room
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {rooms.slice(0, 3).map((room) => (
-                <div
-                  key={room.id}
-                  className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition cursor-pointer"
-                  onClick={() => handleRoomClick(room)}
-                >
-                  <div
-                    className="w-10 h-10 flex items-center justify-center rounded-md mr-4 text-white"
-                    style={{ backgroundColor: room.theme?.primary_color || '#6366F1' }}
-                  >
-                    <LayoutGrid className="w-6 h-6" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center">
-                      <h3 className="text-base font-medium text-gray-900 truncate">{room.name}</h3>
-                      <div className={`ml-2 px-2 py-0.5 text-xs rounded-full ${
-                        room.is_active 
-                          ? 'bg-green-100 text-green-700' 
-                          : 'bg-gray-100 text-gray-600'
-                      }`}>
-                        {room.is_active ? 'Active' : 'Inactive'}
-                      </div>
-                    </div>
-                    <div className="flex items-center mt-1">
-                      <span className="text-sm text-gray-500">Customer: </span>
-                      <span className="ml-1 px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full">{room.customer_id || 'ak'}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-              
-              <div className="flex justify-center pt-2">
-                <button
-                  onClick={() => navigate('/ak/admin/rooms')}
-                  className="px-4 py-2 text-sm text-purple-600 hover:text-purple-800"
-                >
-                  View All Rooms →
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-        
-        {/* Recent Activity */}
-        <div className="p-6 bg-white rounded-lg shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-800">Recent Activity</h2>
-            <button
-              onClick={fetchRecentActivity}
-              className="p-1 text-gray-400 hover:text-gray-600"
-              title="Refresh activity"
-              disabled={loading}
-            >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            </button>
-          </div>
-          
-          {loading ? (
-            <div className="flex items-center justify-center h-40">
-              <div className="w-8 h-8 border-4 border-gray-200 border-t-purple-600 rounded-full animate-spin"></div>
-            </div>
-          ) : recentActivity.length === 0 ? (
-            <div className="flex flex-col items-center justify-center p-6 bg-gray-50 rounded-lg">
-              <Activity className="w-10 h-10 mb-2 text-gray-400" />
-              <p className="text-gray-600">No recent activity</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {recentActivity.map((activity, index) => (
-                <div key={index} className="border-l-2 border-gray-200 pl-3">
-                  <div className="text-sm">
-                    {activity.type === 'player_join' ? (
-                      <div>
-                        <span className="font-medium">{activity.name}</span>{' '}
-                        joined room{' '}
-                        <span 
-                          className="text-purple-600 cursor-pointer hover:underline"
-                          onClick={() => handleActivityClick(activity.customerId)}
-                        >
-                          {activity.roomName}
-                        </span>
-                        <span className="ml-1 px-1.5 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full">{activity.customerId}</span>
-                      </div>
-                    ) : (
-                      <div>
-                        <span className="font-medium">
-                          {activity.activationType === 'multiple_choice' ? 'Question' :
-                           activity.activationType === 'poll' ? 'Poll' : 'Text Question'}
-                        </span>{' '}
-                        activated in{' '}
-                        <span 
-                          className="text-purple-600 cursor-pointer hover:underline"
-                          onClick={() => handleActivityClick(activity.customerId)}
-                        >
-                          {activity.roomName}
-                        </span>
-                        <span className="ml-1 px-1.5 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full">{activity.customerId}</span>
-                      </div>
-                    )}
-                  </div>
-                  <div className="mt-1 text-xs text-gray-500">
-                    {new Date(activity.created_at).toLocaleString()}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
 }
+
+export default usePollManager;
