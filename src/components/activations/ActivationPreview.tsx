@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { supabase } from '../lib/supabase';
-import { retry, isNetworkError, logError } from '../lib/error-handling';
+import { supabase } from '../../lib/supabase';
+import { retry, isNetworkError, logError } from '../../lib/error-handling';
 
 interface PollOption {
   id?: string;
