@@ -9,6 +9,32 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+// Function to get the current session
+export const getCurrentSession = async () => {
+  try {
+    const { data } = await supabase.auth.getSession();
+    return data.session;
+  } catch (error) {
+    console.error('Error getting current session:', error);
+    return null;
+  }
+};
+
+// Function to refresh the current token
+export const refreshToken = async () => {
+  try {
+    const { data, error } = await supabase.auth.refreshSession();
+    if (error) {
+      console.error('Error refreshing token:', error);
+      return null;
+    }
+    return data.session;
+  } catch (error) {
+    console.error('Error refreshing token:', error);
+    return null;
+  }
+};
+
 // Function to check if Supabase connection is healthy
 export const checkSupabaseConnection = async () => {
   if (!navigator.onLine) {
