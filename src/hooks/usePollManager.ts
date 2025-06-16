@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { retry, isNetworkError, logError } from '../lib/error-handling';
 
-interface PollOption {
+export interface PollOption {
   id?: string;
   text: string;
   media_type?: 'none' | 'image' | 'gif';
@@ -22,7 +22,7 @@ interface PollVoteCount {
   [optionId: string]: number;
 }
 
-interface UsePollManagerProps {
+export interface UsePollManagerProps {
   activationId: string | null;
   options?: PollOption[];
   playerId?: string | null;
@@ -30,9 +30,9 @@ interface UsePollManagerProps {
   debugMode?: boolean;
 }
 
-interface UsePollManagerReturn {
-  votes: PollVoteCount;
-  votesByText: { [text: string]: number };
+export interface UsePollManagerReturn {
+  votes: Record<string, number>;
+  votesByText: Record<string, number>;
   totalVotes: number;
   hasVoted: boolean;
   selectedOptionId: string | null;
@@ -43,6 +43,10 @@ interface UsePollManagerReturn {
   submitVote: (optionId: string) => Promise<{ success: boolean; error?: string }>;
   resetPoll: () => void;
 }
+
+/* -------------------------------------------------------------------------- */
+/*                               HOOK DEFINITION                              */
+/* -------------------------------------------------------------------------- */
 
 export function usePollManager({ 
   activationId, 
@@ -100,6 +104,10 @@ export function usePollManager({
       }
     } catch (err) {
       console.error('Error fetching poll state:', err);
+    }
+    
+    if (debugMode) {
+      console.log(`[${debugIdRef.current}] Initializing poll for activation: ${activationId}, player: ${playerId || 'none'}, room: ${roomId || 'none'}, interval: ${pollingInterval}ms`);
     }
     
     // Don't fetch too frequently (throttle to once per second)
