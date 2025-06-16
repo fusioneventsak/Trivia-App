@@ -111,12 +111,12 @@ const Results: React.FC<ResultsProps> = ({ code: propCode }) => {
       .subscribe();
     
     // Set up subscription for game session changes
-    const gameSessionSubscription = supabase.channel(`game_session_${code}`)
+    const gameSessionSubscription = supabase.channel(`game_session_changes`)
       .on('postgres_changes', {
         event: 'UPDATE',
         schema: 'public',
         table: 'game_sessions',
-        filter: `room_id=eq.${room?.id}`
+        filter: `room_id=eq.${roomId}`
       }, (payload) => {
         // If current_activation changed, reload
         if (payload.new && payload.old && 

@@ -51,7 +51,8 @@ const Game = () => {
           
         if (sessionError) {
           console.error('Error fetching game session:', sessionError);
-          setError('Failed to load game session');
+          console.log('No game session found, showing waiting screen');
+          setCurrentActivation(null);
           setLoading(false);
           return;
         }
