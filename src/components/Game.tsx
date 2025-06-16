@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { usePollManager } from '../hooks/usePollManager';
 import { supabase } from '../lib/supabase';
-import { useGameStore } from '../store/gameStore'; 
+import { useGameStore } from '../store/gameStore';
 import { useTheme } from '../context/ThemeContext';
 import NetworkStatus from './ui/NetworkStatus';
-import { AlertCircle, Loader2, Clock, RefreshCw } from 'lucide-react';
+import { AlertCircle, Loader2, Clock, RefreshCw, WifiOff } from 'lucide-react';
 import MediaDisplay from './ui/MediaDisplay';
 import PollVoteForm from './ui/PollVoteForm';
 import { cn } from '../lib/utils';
+import QRCodeDisplay from './ui/QRCodeDisplay';
 
 const Game = () => {
   const { roomId } = useParams<{ roomId: string }>();
@@ -20,6 +21,8 @@ const Game = () => {
   const [currentActivation, setCurrentActivation] = useState<any | null>(null);
   const [isConnected, setIsConnected] = useState(true);
   const [retryCount, setRetryCount] = useState(0);
+  const [connectionAttempts, setConnectionAttempts] = useState(0);
+  const [lastError, setLastError] = useState<any>(null);
   
   // State for answer submission
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
@@ -35,6 +38,22 @@ const Game = () => {
   // Get current player
   const currentPlayer = getCurrentPlayer();
   
+  // Function to handle connection errors
+  const handleConnectionError = useCallback((err: any) => {
+    console.error('Connection error:', err);
+    setLastError(err);
+    
+    // Check if it's a network error
+    if (!navigator.onLine || (err instanceof TypeError && err.message === 'Failed to fetch')) {
+      setIsConnected(false);
+      setError('Network error. Please check your connection and try again.');
+    } else {
+      setError(`Error loading game: ${err.message || 'Unknown error'}`);
+    }
+    
+    setLoading(false);
+  }, []);
+  
   // Load current activation for this room
   useEffect(() => {
     if (!roomId) return;
@@ -42,8 +61,14 @@ const Game = () => {
     const loadGameSession = async () => {
       try {
         setLoading(true);
+        setConnectionAttempts(prev => prev + 1);
         setError(null);
         
+         // If we've tried too many times, show a more helpful error
+         if (connectionAttempts > 3) {
+           throw new Error('Unable to connect to the game server after multiple attempts. Please try refreshing the page or check your internet connection.');
+         }
+         
         // Get the current game session for this room
         const { data: gameSession, error: sessionError } = await supabase
           .from('game_sessions')
@@ -55,6 +80,7 @@ const Game = () => {
           // If the error is not a "not found" error, log it
           if (sessionError.code !== 'PGRST116') {
             console.error('Error fetching game session:', sessionError);
+             throw sessionError;
           } else {
             console.log('No game session found, showing waiting screen');
           }
@@ -83,31 +109,21 @@ const Game = () => {
             
           if (activationError) {
             console.error('Error fetching activation:', activationError);
-            setError('Failed to load current question');
-            setLoading(false);
-            return;
+             throw activationError;
           }
           
           console.log('Activation loaded successfully:', activation);
           setCurrentActivation(activation);
+           // Reset connection attempts on success
+           setConnectionAttempts(0);
         } catch (activationErr) {
           console.error('Exception fetching activation:', activationErr);
-          setError('Failed to load current question');
+           throw activationErr;
         }
 
         setLoading(false);
       } catch (err) {
-        console.error('Error in loadCurrentActivation:', err);
-        
-        // Check if it's a network error
-        if (!navigator.onLine || (err instanceof TypeError && err.message === 'Failed to fetch')) {
-          setError('Network error. Please check your connection and try again.');
-          setIsConnected(false);
-        } else {
-          setError('An unexpected error occurred');
-        }
-        
-        setLoading(false);
+        handleConnectionError(err);
       }
     };
     
@@ -147,10 +163,13 @@ const Game = () => {
     
     // Clean up subscriptions
     return () => {
+      if (pollingTimeoutRef.current) {
+        clearTimeout(pollingTimeoutRef.current);
+      }
       gameSessionSubscription.unsubscribe();
       activationSubscription.unsubscribe();
     };
-  }, [roomId, currentActivation, retryCount]);
+  }, [roomId, currentActivation, retryCount, connectionAttempts, handleConnectionError]);
   
   // Check if player is in this room
   useEffect(() => {
@@ -220,11 +239,29 @@ const Game = () => {
   // Loading state
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: `linear-gradient(to bottom right, ${theme.primary_color}, ${theme.secondary_color})` }}>
-        <div className="text-center">
-          <Loader2 className="w-12 h-12 text-purple-600 animate-spin mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-gray-800 mb-2">Loading Game</h2>
-          <p className="text-gray-600">Please wait while we set things up...</p>
+      <div 
+        className="min-h-screen flex items-center justify-center p-4" 
+        style={{ 
+          background: `linear-gradient(to bottom right, ${theme.primary_color}, ${theme.secondary_color})`,
+          color: theme.text_color
+        }}
+      >
+        <div className="bg-white/20 backdrop-blur-sm rounded-xl p-8 max-w-md w-full text-center">
+          <Loader2 className="w-12 h-12 text-white animate-spin mx-auto mb-4" />
+          <h2 className="text-xl font-semibold mb-2">Loading Game</h2>
+          <p className="mb-4">Please wait while we set things up...</p>
+          
+          {connectionAttempts > 1 && (
+            <div className="mt-4 p-3 bg-white/30 rounded-lg text-sm">
+              <p>Connection attempt {connectionAttempts}...</p>
+              {!isConnected && (
+                <div className="mt-2 flex items-center justify-center">
+                  <WifiOff className="w-4 h-4 mr-2" />
+                  <span>Network connection issues detected</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -263,46 +300,17 @@ const Game = () => {
   // Waiting for activation
   if (!currentActivation) {
     return (
-      <div 
-        className="min-h-screen flex flex-col items-center justify-center p-4"
-        style={{ 
-          background: `linear-gradient(to bottom right, ${theme.primary_color}, ${theme.secondary_color})`,
-          color: theme.text_color
+      <WaitingScreen 
+        roomId={roomId}
+        currentPlayer={currentPlayer}
+        isConnected={isConnected}
+        loading={loading}
+        onRefresh={() => { 
+          setRetryCount(prev => prev + 1); 
+          setLoading(true); 
         }}
-      >
-        <div className="bg-white/20 backdrop-blur-sm rounded-xl p-8 max-w-md w-full text-center">
-          <h2 className="text-2xl font-bold mb-4">Waiting for the next question...</h2>
-          
-          {currentPlayer && (
-            <div className="mb-6">
-              <div className="text-lg font-medium">
-                Welcome, {currentPlayer.name}!
-              </div>
-              <div className="mt-2">
-                Your score: {currentPlayer.score || 0} points
-              </div>
-            </div>
-          )}
-          
-          <p className="mb-6">
-            The host will start the next question soon. Please wait.
-          </p>
-          
-          {!isConnected && (
-            <div className="mb-6">
-              <NetworkStatus onRetry={() => window.location.reload()} />
-            </div>
-          )}
-          
-          <button
-            onClick={() => { setRetryCount(prev => prev + 1); setLoading(true); }}
-            className="px-4 py-2 bg-white/30 hover:bg-white/40 rounded-lg transition"
-          >
-            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-            {loading ? 'Refreshing...' : 'Refresh'}
-          </button>
-        </div>
-      </div>
+        theme={theme}
+      />
     );
   }
   
@@ -604,6 +612,98 @@ const Game = () => {
       setSubmittingAnswer(false);
     }
   }
+};
+
+// Separate component for waiting screen
+const WaitingScreen: React.FC<{
+  roomId?: string;
+  currentPlayer?: any;
+  isConnected: boolean;
+  loading: boolean;
+  onRefresh: () => void;
+  theme: any;
+}> = ({ roomId, currentPlayer, isConnected, loading, onRefresh, theme }) => {
+  const [room, setRoom] = useState<any>(null);
+  
+  // Fetch room details for QR code
+  useEffect(() => {
+    if (!roomId) return;
+    
+    const fetchRoom = async () => {
+      try {
+        const { data } = await supabase
+          .from('rooms')
+          .select('name, room_code, logo_url')
+          .eq('id', roomId)
+          .single();
+          
+        if (data) {
+          setRoom(data);
+        }
+      } catch (err) {
+        console.error('Error fetching room details:', err);
+      }
+    };
+    
+    fetchRoom();
+  }, [roomId]);
+  
+  return (
+    <div 
+      className="min-h-screen flex flex-col items-center justify-center p-4"
+      style={{ 
+        background: `linear-gradient(to bottom right, ${theme.primary_color}, ${theme.secondary_color})`,
+        color: theme.text_color
+      }}
+    >
+      <div className="bg-white/20 backdrop-blur-sm rounded-xl p-8 max-w-md w-full text-center">
+        <h2 className="text-2xl font-bold mb-4">Waiting for the next question...</h2>
+        
+        {currentPlayer && (
+          <div className="mb-6">
+            <div className="text-lg font-medium">
+              Welcome, {currentPlayer.name}!
+            </div>
+            <div className="mt-2">
+              Your score: {currentPlayer.score || 0} points
+            </div>
+          </div>
+        )}
+        
+        <p className="mb-6">
+          The host will start the next question soon. Please wait.
+        </p>
+        
+        {/* QR code for others to join */}
+        {room && (
+          <div className="mb-6">
+            <QRCodeDisplay 
+              value={`${window.location.origin}/join?code=${room.room_code}`}
+              title="Invite Others to Join"
+              subtitle={`Share this code: ${room.room_code}`}
+              logoUrl={room.logo_url}
+              theme={theme}
+              size={180}
+            />
+          </div>
+        )}
+        
+        {!isConnected && (
+          <div className="mb-6">
+            <NetworkStatus onRetry={() => window.location.reload()} />
+          </div>
+        )}
+        
+        <button
+          onClick={onRefresh}
+          className="px-4 py-2 bg-white/30 hover:bg-white/40 rounded-lg transition"
+        >
+          <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+          {loading ? 'Refreshing...' : 'Refresh'}
+        </button>
+      </div>
+    </div>
+  );
 };
 
 // Separate component for poll voting that uses the usePollManager hook

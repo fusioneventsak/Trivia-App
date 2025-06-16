@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { WifiOff, Wifi, RefreshCw } from 'lucide-react';
-import { cn } from '../../lib/utils';
 
 interface NetworkStatusProps {
   onRetry?: () => void;
