@@ -4,6 +4,7 @@ import { usePollManager } from '../hooks/usePollManager';
 import { supabase } from '../lib/supabase';
 import { useGameStore } from '../store/gameStore'; 
 import { useTheme } from '../context/ThemeContext';
+import { retry } from '../lib/error-handling';
 import NetworkStatus from './ui/NetworkStatus';
 import { AlertCircle, Loader2, Clock, RefreshCw } from 'lucide-react';
 import MediaDisplay from './ui/MediaDisplay';
@@ -44,17 +45,25 @@ const Game = () => {
         setLoading(true);
         setError(null);
         
-        // Get the current game session for this room
-        const { data: gameSession, error: sessionError } = await supabase
-          .from('game_sessions')
-          .select('current_activation')
-          .eq('room_id', roomId)
-          .maybeSingle();
+        // Get the current game session for this room with retry mechanism
+        const { data: gameSession, error: sessionError } = await retry(
+          () => supabase
+            .from('game_sessions')
+            .select('current_activation')
+            .eq('room_id', roomId)
+            .maybeSingle(),
+          {
+            maxAttempts: 3,
+            delay: 1000,
+            backoff: 'exponential'
+          }
+        );
           
         if (sessionError) {
           // If the error is not a "not found" error, log it
           if (sessionError.code !== 'PGRST116') {
             console.error('Error fetching game session:', sessionError);
+            throw sessionError;
           } else {
             console.log('No game session found, showing waiting screen');
           }
@@ -73,26 +82,31 @@ const Game = () => {
         
         console.log('Found current activation:', gameSession.current_activation);
         
-        // Get the current activation details
+        // Get the current activation details with retry mechanism
         try {
-          const { data: activation, error: activationError } = await supabase
-            .from('activations')
-            .select('*')
-            .eq('id', gameSession.current_activation)
-            .single();
+          const { data: activation, error: activationError } = await retry(
+            () => supabase
+              .from('activations')
+              .select('*')
+              .eq('id', gameSession.current_activation)
+              .single(),
+            {
+              maxAttempts: 3,
+              delay: 1000,
+              backoff: 'exponential'
+            }
+          );
             
           if (activationError) {
             console.error('Error fetching activation:', activationError);
-            setError('Failed to load current question');
-            setLoading(false);
-            return;
+            throw activationError;
           }
           
           console.log('Activation loaded successfully:', activation);
           setCurrentActivation(activation);
         } catch (activationErr) {
           console.error('Exception fetching activation:', activationErr);
-          setError('Failed to load current question');
+          throw new Error('Failed to load current question');
         }
 
         setLoading(false);
@@ -169,11 +183,18 @@ const Game = () => {
     
     const checkPlayerInRoom = async () => {
       try {
-        const { data, error } = await supabase
-          .from('players')
-          .select('id, room_id')
-          .eq('id', currentPlayerId)
-          .single();
+        const { data, error } = await retry(
+          () => supabase
+            .from('players')
+            .select('id, room_id')
+            .eq('id', currentPlayerId)
+            .single(),
+          {
+            maxAttempts: 3,
+            delay: 1000,
+            backoff: 'exponential'
+          }
+        );
           
         console.log('Player data:', data, 'Error:', error);
           
@@ -524,17 +545,24 @@ const Game = () => {
         timeTakenMs = Date.now() - startTime;
       }
       
-      // Submit answer to backend
-      const { data, error } = await supabase.functions.invoke('calculate-points', {
-        body: {
-          activationId: currentActivation.id,
-          roomId,
-          playerId: currentPlayerId,
-          playerName: currentPlayer?.name,
-          answer,
-          timeTakenMs
+      // Submit answer to backend with retry mechanism
+      const { data, error } = await retry(
+        () => supabase.functions.invoke('calculate-points', {
+          body: {
+            activationId: currentActivation.id,
+            roomId,
+            playerId: currentPlayerId,
+            playerName: currentPlayer?.name,
+            answer,
+            timeTakenMs
+          }
+        }),
+        {
+          maxAttempts: 3,
+          delay: 1000,
+          backoff: 'exponential'
         }
-      });
+      );
       
       if (error) throw error;
       
@@ -576,17 +604,24 @@ const Game = () => {
         timeTakenMs = Date.now() - startTime;
       }
       
-      // Submit answer to backend
-      const { data, error } = await supabase.functions.invoke('calculate-points', {
-        body: {
-          activationId: currentActivation.id,
-          roomId,
-          playerId: currentPlayerId,
-          playerName: currentPlayer?.name,
-          answer: answerText.trim(),
-          timeTakenMs
+      // Submit answer to backend with retry mechanism
+      const { data, error } = await retry(
+        () => supabase.functions.invoke('calculate-points', {
+          body: {
+            activationId: currentActivation.id,
+            roomId,
+            playerId: currentPlayerId,
+            playerName: currentPlayer?.name,
+            answer: answerText.trim(),
+            timeTakenMs
+          }
+        }),
+        {
+          maxAttempts: 3,
+          delay: 1000,
+          backoff: 'exponential'
         }
-      });
+      );
       
       if (error) throw error;
       
